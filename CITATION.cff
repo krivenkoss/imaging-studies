@@ -1,0 +1,11 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "imaging-studies: reproducible studies in lossy image compression and denoising"
+authors:
+  - family-names: "Kryvenko"
+    given-names: "S. S."
+    affiliation: "National Aerospace University, Department of Information and Communication Technologies"
+    website: "https://dict.khai.edu/"
+version: "0.1.0"
+license: MIT
+repository-code: "https://github.com/krivenkoss/imaging-studies"

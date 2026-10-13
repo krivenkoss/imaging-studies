@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "imstudies"
+version = "0.1.0"
+description = "Shared code of the imaging-studies repository: metrics, noise models, codec wrappers"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.13"
+authors = [{ name = "S. S. Kryvenko" }]
+dependencies = [
+    "numpy",
+]
+
+[project.optional-dependencies]
+# Laboratory layer: file I/O, tables, figures. Not needed by core tests.
+lab = [
+    "pillow",
+    "pandas",
+    "openpyxl",
+    "matplotlib",
+]
+dev = [
+    "pytest",
+]
+
+[project.urls]
+Repository = "https://github.com/krivenkoss/imaging-studies"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "studies"]
+addopts = "--strict-markers --import-mode=importlib"
+markers = [
+    "core: runs without data, codecs and laboratory packages (what CI and the badges report)",
+    "lab: needs local data, codec executables or laboratory packages",
+]

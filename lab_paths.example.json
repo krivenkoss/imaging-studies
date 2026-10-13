@@ -1,0 +1,12 @@
+{
+  "_what": "The one home of dataset, coder and output paths for laboratory runs (../CLAUDE.md R08). Runs read paths here; command-line arguments override.",
+  "_how": "Copy this file to lab_paths.json beside it and edit the paths. That copy is ignored by git: it holds YOUR machine's layout. Relative paths are resolved against the repository root, so ../Images means a sibling of core/.",
+  "config_path": "../config.json",
+  "cache_root": "../tmp/lab_cache",
+  "images_root": "../Images",
+  "data_root": "../data",
+  "papers_root": "../papers",
+  "coders": {
+    "_note": "Path to each external coder executable; the version is recorded by the wrapper, not here."
+  }
+}
