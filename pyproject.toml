@@ -12,6 +12,7 @@ requires-python = ">=3.13"
 authors = [{ name = "S. S. Kryvenko" }]
 dependencies = [
     "numpy",
+    "scipy",
 ]
 
 [project.optional-dependencies]
