@@ -78,6 +78,10 @@ release/*.zip
 reports/
 release/figures/
 
+# Codec executables built by tools/build_coders.ps1 from pinned archives
+# (third_party/coders.json); rebuilt, never committed. tools/build/ is covered by build/.
+tools/bin/
+
 # Image sets live OUTSIDE this repository (../Images, ../data).
 # Local laboratory cache lives OUTSIDE this repository (../tmp/, see
 # lab_paths.example.json cache_root) and needs no rule here. If a cache is ever

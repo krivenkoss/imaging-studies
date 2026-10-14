@@ -1,0 +1,19 @@
+{
+  "_what": "Pinned sources of the codec executables built by tools/build_coders.ps1 (../REFERENCE.md#studies, item 5). The archives live outside Git under coder_sources of lab_paths.json, one folder per codec; the build refuses an archive whose SHA-256 differs from the one here.",
+  "vtm": {
+    "name": "VTM, VVC reference software (JVET)",
+    "tag": "VTM-23.0",
+    "archive": "VVCSoftware_VTM-VTM-23.0.zip",
+    "folder": "vtm",
+    "url": "https://vcgit.hhi.fraunhofer.de/jvet/VVCSoftware_VTM/-/archive/VTM-23.0/VVCSoftware_VTM-VTM-23.0.zip",
+    "download": "by browser: git access to vcgit.hhi.fraunhofer.de answers HTTP 403 (2026-10-13)",
+    "sha256": "60d596068efada7def2c028ab5c2290efb34c3be1361c581591f6cd4524321f0",
+    "license": "BSD 3-clause, COPYING in the archive: Copyright (c) 2010-2022, ITU/ISO/IEC",
+    "top_dir": "VVCSoftware_VTM-VTM-23.0",
+    "cmake_configure": ["-G", "Visual Studio 17 2022", "-A", "x64", "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"],
+    "cmake_targets": ["EncoderApp", "DecoderApp"],
+    "executables": ["EncoderApp.exe", "DecoderApp.exe"],
+    "copy": ["cfg/encoder_intra_vtm.cfg"],
+    "bin_dir": "vtm-23.0"
+  }
+}
