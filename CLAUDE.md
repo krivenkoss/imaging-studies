@@ -3,7 +3,7 @@
 Project documents live one level above this repository and are **read-only from
 here**. They are written in Russian; code, comments, docstrings and commit messages
 are English (`../CLAUDE.md` R09); `prompts/REPORT.md` is written in
-{{REPORT LANGUAGE — the owner's choice, stated once here; ../REFERENCE.md Q-REPORT-LANG}}.
+Russian (owner decision 2026-10-14; ../REFERENCE.md Q-REPORT-LANG).
 The root repository above stays Russian; the two histories are not mixed.
 
 The subject is image processing research: lossy compression of noisy images,
