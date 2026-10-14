@@ -6,6 +6,8 @@
   "images_root": "../Images",
   "data_root": "../data",
   "papers_root": "../papers",
+  "metric_sources": "../other/sources/metrics",
+  "octave_cli": "C:/Program Files/GNU Octave/Octave-<version>/mingw64/bin/octave-cli.exe",
   "coders": {
     "_note": "Path to each external coder executable; the version is recorded by the wrapper, not here."
   }

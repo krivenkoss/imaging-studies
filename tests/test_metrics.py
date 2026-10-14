@@ -5,7 +5,9 @@ Truth comes from outside the implementation: analytic SSE and the decimal oracle
 tests/vectors/metrics_reference.json for PSNR-HVS-M and HaarPSI.
 
 Tolerances, declared before the results:
-- V1-a (B02): SSE exact; PSNR bit-exact where 65025*N/SSE = 10**k, else <= 2 ulp of the oracle.
+- V1-a (../REFERENCE.md#b02, "Допуски", from cycle 2): SSE exact; PSNR bit-exact where
+  65025*N/SSE = 10**k, else |d| <= 2 ulp(PSNR) + 5e-16 dB from the oracle. Where PSNR
+  cannot fall below 10 dB, the tests keep the stricter 2 ulp.
 - vectors: |d PSNR-HVS-M| <= 1e-9 dB against psnrhvsm.m; |d HaarPSI| <= 1e-12 against
   haarPsi.py and HaarPSI.m. Tighter than V1-b/V1-c (0.01 dB, 1e-4): the expected
   difference is rounding (~1e-12 dB, ~1e-14), so anything above these bounds is a defect.
@@ -40,6 +42,11 @@ METRICS = {"psnr": (psnr, 1), "psnr_hvs_m": (psnr_hvs_m, 8), "haarpsi": (haarpsi
 
 def _ulps(value, exact):
     return abs(Decimal(value) - exact) / Decimal(math.ulp(float(exact)))
+
+
+def _v1a_tolerance(exact):
+    """B02 V1-a outside 10**k: 2 ulp(PSNR) + 5e-16 dB (bound of rounding 65025*N/SSE to float64)."""
+    return 2 * Decimal(math.ulp(float(exact))) + Decimal("5e-16")
 
 
 def _pair_with_differences(shape, diffs):
@@ -95,15 +102,20 @@ ANALYTIC = (
 
 
 @pytest.mark.parametrize("kind, shape, d, sse", ANALYTIC)
-def test_psnr_within_two_ulp_on_analytic_sse(kind, shape, d, sse):
+def test_psnr_v1a_on_analytic_sse(kind, shape, d, sse):
     ref, dist = (_constant if kind == "constant" else _checkerboard)(shape, d)
     assert _sse(ref, dist) == sse
     exact = oracle.psnr(ref.tolist(), dist.tolist())
     assert oracle.sse(ref.tolist(), dist.tolist()) == sse
-    assert _ulps(psnr(ref, dist, max_pixels=ref.size).value, exact) <= 2
+    value = psnr(ref, dist, max_pixels=ref.size).value
+    if exact < 10:  # d = 100 and 127: 8.1 and 6.1 dB - the B02 tolerance
+        assert abs(Decimal(value) - exact) <= _v1a_tolerance(exact)
+    else:  # 12 dB and above: 2 ulp, stricter than B02
+        assert _ulps(value, exact) <= 2
 
 
 def test_psnr_within_two_ulp_on_random_pairs():
+    # |difference| <= 79 keeps MSE <= 6241, PSNR >= 10.18 dB: 2 ulp, stricter than B02, stays
     rng = np.random.default_rng(11)
     for _ in range(200):
         h, w = (int(v) for v in rng.integers(1, 70, 2))
@@ -118,15 +130,58 @@ def test_psnr_within_two_ulp_on_random_pairs():
             assert _ulps(psnr(ref, dist, max_pixels=ref.size).value, exact) <= 2
 
 
-@pytest.mark.xfail(strict=True, reason="B02 formula exceeds 2 ulp near 0 dB: log10 of a quotient near 1 "
-                                       "(reported to the owner, cycle 1; contract not edited)")
-def test_psnr_two_ulp_near_zero_db():
+def test_psnr_v1a_cycle1_case_near_zero_db():
+    # the strict xfail of cycle 1 (1792 ulp at 7.3e-4 dB), now under the B02 tolerance of cycle 2
     ref = np.zeros((512, 512), np.uint8)
     dist = np.full((512, 512), 255, np.uint8)
     dist.flat[262100:] = 0
     dist.flat[262100] = 1
     exact = oracle.psnr(ref.tolist(), dist.tolist())
-    assert _ulps(psnr(ref, dist, max_pixels=ref.size).value, exact) <= 2
+    assert abs(Decimal(psnr(ref, dist, max_pixels=ref.size).value) - exact) <= _v1a_tolerance(exact)
+
+
+NEAR_ZERO_SEED = 20261014
+
+
+def _near_zero_pairs():
+    """1000 deterministic pairs with PSNR in (0; 2] dB, N from 1 pixel to 512 x 512.
+
+    Every |difference| is in 203..255 (203**2 > 65025 / 10**0.2, so PSNR < 2 dB) and at least
+    one is below 255 (PSNR > 0). Half the pairs put a log-uniform number of pixels below 255
+    (down to ~1e-7 dB), half spread the differences over [lo, 255].
+    """
+    rng = np.random.default_rng(NEAR_ZERO_SEED)
+    plan = [(1, 2)] + [(1, 9)] * 500 + [(9, 65)] * 400 + [(65, 257)] * 92 + [(257, 512)] * 4 + [(512, 513)] * 3
+    for lo, hi in plan:
+        h, w = (int(v) for v in rng.integers(lo, hi, 2))
+        n = h * w
+        if rng.random() < 0.5:
+            d = np.full(n, 255)
+            m = max(1, int(n ** rng.random()))
+            d[rng.choice(n, m, replace=False)] = rng.integers(203, 255, m)
+        else:
+            d = rng.integers(int(rng.integers(203, 255)), 256, n)
+            if (d == 255).all():
+                d[int(rng.integers(n))] = 254
+        ref = np.where(rng.random(n) < 0.5, 0, 255)
+        dist = np.where(ref == 0, d, 255 - d)
+        yield ref.reshape(h, w).astype(np.uint8), dist.reshape(h, w).astype(np.uint8)
+
+
+def test_psnr_v1a_near_zero_db():
+    records, sizes = [], set()
+    for ref, dist in _near_zero_pairs():
+        exact = oracle.psnr(ref.tolist(), dist.tolist())
+        assert 0 < exact <= 2
+        value = psnr(ref, dist, max_pixels=ref.size).value
+        delta = abs(Decimal(value) - exact)
+        records.append((float(delta / _v1a_tolerance(exact)), float(exact), float(delta),
+                        float(_ulps(value, exact)), ref.shape))
+        sizes.add(ref.size)
+    assert len(records) >= 1000 and min(sizes) == 1 and max(sizes) == 512 * 512
+    over = sorted((r for r in records if r[0] > 1), reverse=True)
+    assert not over, f"{len(over)} of {len(records)} pairs over the V1-a tolerance; worst first: " + "; ".join(
+        f"PSNR={p:.3e} dB |d|={d:.3e} dB ulp={u:.1f} |d|/tol={x:.3f} shape={s}" for x, p, d, u, s in over[:5])
 
 
 # --- identical images and outputs ----------------------------------------------------------------
