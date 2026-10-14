@@ -12,13 +12,16 @@ import numpy as np
 from scipy.fft import dctn
 from scipy.signal import convolve2d
 
-# Refusal reasons reachable in this module (flat list of ../REFERENCE.md#spec-result).
+# Refusal reasons of the package: the flat list of ../REFERENCE.md#spec-result without
+# internal_error (status `error`, not a refusal). parameter_out_of_range is reachable in
+# imstudies.lab.coders.vtm (B05), the others in this module.
 REFUSAL_REASONS = (
     "not_2d",
     "unsupported_dtype",
     "shape_mismatch",
     "image_too_small",
     "parameter_not_assigned",
+    "parameter_out_of_range",
     "image_too_large",
     "zero_weight_sum",
 )
