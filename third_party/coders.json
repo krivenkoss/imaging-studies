@@ -15,5 +15,16 @@
     "executables": ["EncoderApp.exe", "DecoderApp.exe"],
     "copy": ["cfg/encoder_intra_vtm.cfg"],
     "bin_dir": "vtm-23.0"
+  },
+  "gpac": {
+    "name": "GPAC (MP4Box, gpac): packing of the VVC bitstream into HEIF, B09",
+    "kind": "installer, not built by tools/build_coders.ps1",
+    "build": "26.08-DEV-rev171-gf9f54240-master (nightly build of branch master, not the release 26.07.0)",
+    "installer": "gpac_latest_head_win64.exe",
+    "folder": "gpac",
+    "sha256": "7770b709f2fd1ec71bf4da8a50a4d7f0fb296ea15e81758f2758b0f65bb21381",
+    "installed_to": "C:/Program Files/GPAC/ (owner, 2026-10-15)",
+    "download": "address of the installer not recorded; the installer itself is kept under coder_sources/gpac",
+    "license": "LGPL v2.1+ (MP4Box -version: distributed under LGPL v2.1+)"
   }
 }

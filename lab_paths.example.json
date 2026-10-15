@@ -9,12 +9,17 @@
   "metric_sources": "../other/sources/metrics",
   "octave_cli": "C:/Program Files/GNU Octave/Octave-<version>/mingw64/bin/octave-cli.exe",
   "coder_sources": "../other/sources/coders",
+  "v3a_reference": "<path to the assistant's V3-a reference v3a_ijg9e.json>",
   "coders": {
     "_note": "Path to each external coder executable; the version is recorded by the wrapper, not here.",
     "vtm": {
       "encoder": "tools/bin/vtm-<tag version>/EncoderApp.exe",
       "decoder": "tools/bin/vtm-<tag version>/DecoderApp.exe",
       "cfg": "tools/bin/vtm-<tag version>/encoder_intra_vtm.cfg"
+    },
+    "gpac": {
+      "mp4box": "<GPAC install folder>/mp4box.exe",
+      "gpac": "<GPAC install folder>/gpac.exe"
     }
   }
 }
