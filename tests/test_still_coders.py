@@ -2,21 +2,29 @@
 
 Need Pillow 12.3.0 and pillow-heif 1.8.1 of the [lab] group. Every step of the validation order
 and every promise of the outputs is checked on both sides.
+
+The wrappers and Pillow (the [lab] group) are imported inside the tests, not at module level:
+`-m core` then deselects these tests in an environment without [lab] instead of failing at
+collection, and nothing is skipped silently in an environment with [lab].
 """
 
 import hashlib
+import importlib
 import io
 
 import numpy as np
 import pytest
-from PIL import Image
 
 from imstudies.core.metrics import Refusal
-from imstudies.lab.coders import avif, heif, isobmff, jpeg
 
 pytestmark = pytest.mark.lab
 
-CODECS = {"jpeg": jpeg, "heif": heif, "avif": avif}
+CODECS = ("jpeg", "heif", "avif")
+
+
+def _codec(name):
+    """The wrapper module imstudies.lab.coders.<name> (imports Pillow or pillow-heif)."""
+    return importlib.import_module(f"imstudies.lab.coders.{name}")
 
 
 def _frame(h, w):
@@ -33,7 +41,7 @@ def _reason(module, *args, **kwargs):
 
 @pytest.mark.parametrize("name", CODECS)
 def test_refusals_and_their_order(name):
-    m, good = CODECS[name], _frame(16, 16)
+    m, good = _codec(name), _frame(16, 16)
     assert _reason(m, good[None], 50, max_pixels=256) == "not_2d"
     assert _reason(m, good.astype(np.float64)[None], None, max_pixels=None) == "not_2d"
     assert _reason(m, good.astype(np.uint16), 50, max_pixels=256) == "unsupported_dtype"
@@ -51,7 +59,7 @@ def test_refusals_and_their_order(name):
 
 @pytest.mark.parametrize("name, low, high", [("jpeg", 1, 100), ("heif", 0, 100), ("avif", 0, 100)])
 def test_quality_range_both_sides(name, low, high):
-    m, image = CODECS[name], _frame(16, 16)
+    m, image = _codec(name), _frame(16, 16)
     for q in (low - 1, high + 1):
         assert _reason(m, image, q, max_pixels=256) == "parameter_out_of_range"
     for q in (low, high, np.int64(50)):
@@ -62,7 +70,7 @@ def test_quality_range_both_sides(name, low, high):
 @pytest.mark.parametrize("name", CODECS)
 @pytest.mark.parametrize("shape", [(8, 8), (21, 13), (517, 389)])
 def test_shape_kept_and_three_calls_identical(name, shape):
-    m, image = CODECS[name], _frame(*shape)
+    m, image = _codec(name), _frame(*shape)
     results = [m.encode_decode(image, 50, max_pixels=image.size) for _ in range(3)]
     assert len({hashlib.sha256(r.file).hexdigest() for r in results}) == 1
     assert all(r.recon.shape == shape and r.recon.dtype == np.uint8 for r in results)
@@ -70,7 +78,7 @@ def test_shape_kept_and_three_calls_identical(name, shape):
 
 
 def test_provenance_names_versions_and_every_argument():
-    image = _frame(16, 16)
+    jpeg, heif, avif, image = _codec("jpeg"), _codec("heif"), _codec("avif"), _frame(16, 16)
     pj = jpeg.encode_decode(image, 75, max_pixels=256).provenance
     assert pj["versions"] == jpeg.EXPECTED_VERSIONS
     assert (pj["encode"]["quality"], pj["encode"]["optimize"], pj["encode"]["progressive"]) == (75, False, False)
@@ -85,12 +93,16 @@ def test_provenance_names_versions_and_every_argument():
 
 
 def _colour_heif(image, quality):
+    from PIL import Image
+
     buf = io.BytesIO()
     Image.fromarray(np.stack([image] * 3, axis=-1), "RGB").save(buf, "HEIF", quality=quality)
     return buf.getvalue()
 
 
 def _colour_avif(image, quality):
+    from PIL import Image
+
     buf = io.BytesIO()
     Image.fromarray(np.stack([image] * 3, axis=-1), "RGB").save(buf, "AVIF", quality=quality, subsampling="4:2:0",
                                                                  max_threads=1)
@@ -98,7 +110,7 @@ def _colour_avif(image, quality):
 
 
 def test_heif_colour_file_is_a_failure(monkeypatch):
-    image = _frame(16, 16)
+    heif, isobmff, image = _codec("heif"), _codec("isobmff"), _frame(16, 16)
     assert isobmff.hevc_chroma_format_idc(heif.encode_decode(image, 50, max_pixels=256).file) == 0
     monkeypatch.setattr(heif, "_encode", _colour_heif)
     with pytest.raises(RuntimeError, match="hvcC chroma_format_idc = 1, not 0") as info:
@@ -107,7 +119,7 @@ def test_heif_colour_file_is_a_failure(monkeypatch):
 
 
 def test_avif_colour_file_is_a_failure(monkeypatch):
-    image = _frame(16, 16)
+    avif, isobmff, image = _codec("avif"), _codec("isobmff"), _frame(16, 16)
     assert isobmff.av1_monochrome(avif.encode_decode(image, 50, max_pixels=256).file) == 1
     monkeypatch.setattr(avif, "_encode", _colour_avif)
     with pytest.raises(RuntimeError, match="av1C monochrome = 0, not 1"):
@@ -116,7 +128,7 @@ def test_avif_colour_file_is_a_failure(monkeypatch):
 
 @pytest.mark.parametrize("name", CODECS)
 def test_version_mismatch_is_refused_in_words_before_the_call(name, monkeypatch):
-    m, image = CODECS[name], _frame(16, 16)
+    m, image = _codec(name), _frame(16, 16)
     assert m.encode_decode(image, 50, max_pixels=256).provenance["versions"] == m.EXPECTED_VERSIONS
     key = next(iter(m.EXPECTED_VERSIONS))
     monkeypatch.setattr(m, "EXPECTED_VERSIONS", dict(m.EXPECTED_VERSIONS, **{key: "0.0.0"}))

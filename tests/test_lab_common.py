@@ -4,6 +4,9 @@
   src/ or studies/ refuse; an untracked file elsewhere does not (git needed);
 - load_test_images: the same pixels as run_v1.test_set and as the run file of cycle 1
   (local test images and cycles/1/v1_metrics.json needed).
+
+Packages of the [lab] group (Pillow) are imported inside the tests, not at module level: `-m core`
+then deselects these tests in an environment without [lab] instead of failing at collection.
 """
 
 import hashlib
@@ -16,7 +19,6 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from imstudies.lab.images import load_test_images
 from imstudies.lab.runs import RunRefusal, git_state, json_number, sha256_file
 
 pytestmark = pytest.mark.lab
@@ -71,6 +73,8 @@ def test_json_number_and_sha256(tmp_path):
 
 
 def test_test_images_parity_with_run_v1_and_cycle_1():
+    from imstudies.lab.images import load_test_images  # Pillow: [lab] group
+
     paths_file = ROOT / "lab_paths.json"
     if not paths_file.is_file():
         pytest.skip("lab_paths.json is absent: the laboratory is not configured on this machine")
