@@ -9,7 +9,6 @@ book v2a_vtm.xlsx beside it; `--rebuild-book` rebuilds the book from the run fil
 import argparse
 import datetime
 import hashlib
-import importlib.util
 import json
 import math
 import platform
@@ -23,13 +22,11 @@ from PIL import Image
 import imstudies
 from imstudies.core.metrics import Refusal, psnr
 from imstudies.lab.coders import vtm
+from imstudies.lab.images import load_test_images
+from imstudies.lab.runs import RunRefusal, git_state, json_number, sha256_file
 
 STUDY = Path(__file__).resolve().parent
 ROOT = STUDY.parents[1]
-_spec = importlib.util.spec_from_file_location("run_v1", STUDY / "run_v1.py")
-v1 = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(v1)  # images are read exactly as in run_v1.py (test_set, read_gray)
-RunRefusal = v1.RunRefusal
 
 COMMAND = "python studies/P001_vvc-dental/run_v2a.py"
 QUESTION = ("V2-a: совпадает ли побитово выход DecoderApp с восстановлением EncoderApp (VTM-23.0) на 59 парах "
@@ -37,6 +34,10 @@ QUESTION = ("V2-a: совпадает ли побитово выход DecoderAp
 CYCLE, RUN_FILE, BOOK_FILE = 3, "v2a_vtm.json", "v2a_vtm.xlsx"
 QPS = (-12, 0, 12, 22, 32, 42, 51, 63)
 ODD_SHAPES = ((8, 8), (21, 13), (517, 389))  # (H, W), cropped from the E0 recipe on 517 x 512
+# The six test images of cycle 1, read as in run_v1.py (imstudies.lab.images, parity tested).
+TEST_IMAGES = ["BABOON.BMP", "BARBARA.BMP", "goldhill.bmp", "lenna.bmp", "frisco.bmp", "DIEGO.BMP"]
+TIMEOUT_S = {"value": 600, "basis": "per EncoderApp or DecoderApp run: over 10 times the longest call of "
+                                    "cycle 3 (43 s, 512 x 512 at QP 0); an operational limit, no effect on numbers"}
 LEVEL = {"value": "5", "status": "provisional",
          "basis": "smallest VVC level covering all P001 sources by header sizes (19 files: max H*W 4170592, "
                   "max H 1504, max W 2789): Level 4/4.1 MaxLumaPs 2228224 < 4170592 <= 8912896 of Level 5; "
@@ -72,7 +73,7 @@ def e0_recipe(h, w):
 
 def images_of_the_cycle(images_root):
     images = [{"code": "e0", "class": "control", "source": "E0 recipe 512 x 512, seed 1", "array": e0_recipe(512, 512)}]
-    for img in v1.test_set(images_root):
+    for img in load_test_images(images_root, TEST_IMAGES, (512, 512)):
         images.append({"code": img["code"], "class": "test", "source": img["source"],
                        "source_sha256": img["source_sha256"], "array": img["array"]})
     base = e0_recipe(517, 512)
@@ -101,7 +102,7 @@ def load_paths():
         raise RunRefusal(f"{manifest} not found: the executables are not a build of tools/build_coders.ps1")
     paths["manifest"] = json.loads(manifest.read_text(encoding="utf-8"))
     for key in ("encoder", "decoder", "cfg"):
-        if v1.sha256_file(paths[key]) != paths["manifest"]["files_sha256"].get(paths[key].name):
+        if sha256_file(paths[key]) != paths["manifest"]["files_sha256"].get(paths[key].name):
             raise RunRefusal(f"{paths[key].name} differs from its MANIFEST.json sha256")
     return paths
 
@@ -117,7 +118,8 @@ def encode(paths, img, qp, work):
     started = time.perf_counter()
     try:
         result = vtm.encode_decode(image, qp, max_pixels=image.size, level=LEVEL["value"],
-                                   frame_rate=FRAME_RATE["value"], encoder=paths["encoder"],
+                                   frame_rate=FRAME_RATE["value"], timeout_s=TIMEOUT_S["value"],
+                                   encoder=paths["encoder"],
                                    decoder=paths["decoder"], cfg=paths["cfg"], work_root=work)
     except Refusal as refusal:
         return NO_RESULT | {"status": "no_result", "reason": refusal.reason, "detail": str(refusal)}, None
@@ -134,7 +136,7 @@ def encode(paths, img, qp, work):
         "encoder_recon_sha256": hashlib.sha256(result.encoder_recon.tobytes()).hexdigest(),
         "shape_ok": result.recon.shape == image.shape,
         "v2a_match": result.recon.shape == image.shape and np.array_equal(result.recon, result.encoder_recon),
-        "psnr_b02": v1.json_number(ours), "log_psnr_y": v1.json_number(result.log_psnr_y),
+        "psnr_b02": json_number(ours), "log_psnr_y": json_number(result.log_psnr_y),
         "log_minus_ours": (result.log_psnr_y - ours if result.log_psnr_y is not None
                            and math.isfinite(ours) and math.isfinite(result.log_psnr_y) else None),
         "seconds": round(time.perf_counter() - started, 2),
@@ -213,7 +215,7 @@ def run(paths, images, plan, determinism_plan, out_dir, state):
         "run": RUN_FILE, "study": "P001", "cycle": CYCLE, "question": QUESTION, "command": COMMAND,
         "started_utc": started.isoformat(timespec="seconds"),
         "finished_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
-        **state, "declared_before_numbers": DECLARED, "level": LEVEL, "frame_rate": FRAME_RATE,
+        **state, "declared_before_numbers": DECLARED, "level": LEVEL, "frame_rate": FRAME_RATE, "timeout_s": TIMEOUT_S,
         "max_pixels_rule": MAX_PIXELS_RULE, "build_manifest": paths["manifest"],
         "wrapper_provenance": {k: v for k, v in control.provenance.items() if not k.endswith("_command")}
         | {"encoder_command_template": [a if not a.endswith((".yuv", ".bin")) else Path(a).name
@@ -239,7 +241,7 @@ def run(paths, images, plan, determinism_plan, out_dir, state):
           f"{s['n_images_with_series']} images; |log PSNR-Y - ours| max {s['max_abs_log_minus_ours_db']!r} dB, "
           f"median {s['median_abs_log_minus_ours_db']!r} dB over {s['n_log_psnr_compared']} pairs; "
           f"PSNR B02 = +inf on {s['n_infinite_psnr_b02']} pairs")
-    print(f"Run file: {run_path} (sha256 {v1.sha256_file(run_path)})\nBook: {book_path}")
+    print(f"Run file: {run_path} (sha256 {sha256_file(run_path)})\nBook: {book_path}")
     return run_path, book_path
 
 
@@ -384,7 +386,7 @@ def main(argv=None):
             return 0
         if (out_dir / RUN_FILE).exists():
             raise RunRefusal(f"{out_dir / RUN_FILE} already exists: a run file of cycle {CYCLE} is never overwritten")
-        state = v1.git_state()
+        state = git_state(ROOT)
         images = images_of_the_cycle(paths["images_root"])
         plan = [(img["code"], qp) for img in images if img["class"] != "synthetic" for qp in QPS]
         plan += [(f"syn{h}x{w}", 32) for h, w in ODD_SHAPES]

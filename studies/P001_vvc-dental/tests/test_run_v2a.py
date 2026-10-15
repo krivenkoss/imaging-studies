@@ -59,6 +59,15 @@ def test_run_on_one_pair_and_refusal_by_name(v2a, paths, images, tmp_path):
     assert row["level_status"] == row["frame_rate_status"] == "provisional"
     assert record["summary"]["verdict_v2a"] == record["summary"]["verdict_determinism"] == "pass"
     assert record["build_manifest"]["tag"] == "VTM-23.0" and book_path.is_file()
+    assert record["timeout_s"]["value"] == record["wrapper_provenance"]["timeout_s"] == v2a.TIMEOUT_S["value"]
+
+    # V2-a reproduced: the same bitstream and recon as the run file of cycle 3 (read, never rewritten)
+    cycle3 = json.loads((paths["cache_root"] / "cycles" / "3" / v2a.RUN_FILE).read_text(encoding="utf-8"))
+    recorded = {(r["image_code"], r["qp"]): r for r in cycle3["rows"]}
+    for now in (record["path_control"], row):
+        then = recorded[now["image_code"], now["qp"]]
+        assert (now["bitstream_sha256"], now["recon_sha256"]) == (then["bitstream_sha256"], then["recon_sha256"])
+
     with pytest.raises(v2a.RunRefusal, match=v2a.RUN_FILE):
         v2a.run(paths, images, [("syn21x13", 32)], [], tmp_path, state)
 
