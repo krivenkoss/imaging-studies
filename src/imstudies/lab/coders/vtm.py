@@ -7,15 +7,14 @@ Executables are our builds of tools/build_coders.ps1; their paths come from lab_
 import hashlib
 import math
 import re
-import subprocess
 import tempfile
-import time
 from pathlib import Path
 from typing import NamedTuple
 
 import numpy as np
 
 from imstudies.core.metrics import Refusal
+from imstudies.lab.coders.process import read_plane, run_tool
 
 QP_MIN, QP_MAX = -12, 63  # B05: -6 * (InternalBitDepth - 8) .. 63 at InternalBitDepth 10
 BIT_DEPTHS = {"InputBitDepth": 8, "InternalBitDepth": 10, "OutputBitDepth": 8}
@@ -64,26 +63,6 @@ def _tail(text, n=1500):
     return text[-n:] if text else "(no output)"
 
 
-def _run(cmd, timeout_s):
-    """Run an executable; a non-zero exit or the time limit is a failure (status `error`), never a refusal."""
-    started = time.perf_counter()
-    try:
-        out = subprocess.run(cmd, capture_output=True, text=True, errors="replace", timeout=timeout_s)
-    except subprocess.TimeoutExpired as exc:
-        raise TimeoutError(f"{Path(cmd[0]).name} exceeded timeout_s={timeout_s}: "
-                           f"{time.perf_counter() - started:.1f} s elapsed; command: {cmd}") from exc
-    if out.returncode != 0:
-        raise subprocess.CalledProcessError(out.returncode, cmd, output=out.stdout[-2000:], stderr=out.stderr[-2000:])
-    return out.stdout
-
-
-def _plane(path, h, w, what):
-    size = path.stat().st_size if path.is_file() else None
-    if size != h * w:
-        raise RuntimeError(f"{what}: expected {h * w} bytes (8-bit {h}x{w} plane), found {size}")
-    return np.fromfile(path, dtype=np.uint8).reshape(h, w)
-
-
 def _sha256(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
@@ -105,7 +84,7 @@ def encode_decode(image, qp, *, max_pixels, level, frame_rate, timeout_s, encode
                   *(f"--{key}={value}" for key, value in BIT_DEPTHS.items()),
                   "--InputChromaFormat=400", "--ChromaFormatIDC=400", f"--SourceWidth={w}", f"--SourceHeight={h}",
                   "--FramesToBeEncoded=1", f"--QP={int(qp)}", f"--Level={level}", f"--FrameRate={frame_rate}"]
-        log = _run(encode, timeout_s)
+        log = run_tool(encode, timeout_s)
         version = re.search(r"VTM Encoder Version[^\r\n]*", log)
         if version is None:
             raise RuntimeError(f"EncoderApp printed no 'VTM Encoder Version' line; output tail: {_tail(log)}")
@@ -114,9 +93,9 @@ def encode_decode(image, qp, *, max_pixels, level, frame_rate, timeout_s, encode
                                f"output tail: {_tail(log)}")
         bitstream = stream.read_bytes()
         decode = [str(decoder), "-b", str(stream), "-o", str(recon), "-d", "8"]
-        dec_log = _run(decode, timeout_s)
-        result_recon = _plane(recon, h, w, "DecoderApp output")
-        result_enc_recon = _plane(enc_recon, h, w, "EncoderApp reconstruction")
+        dec_log = run_tool(decode, timeout_s)
+        result_recon = read_plane(recon, h, w, "DecoderApp output")
+        result_enc_recon = read_plane(enc_recon, h, w, "EncoderApp reconstruction")
     psnr_y = re.search(r"\[Y\s+([-+0-9.eEinf]+)\s+dB", log)
     dec_version = re.search(r"VTM Decoder Version[^\r\n]*", dec_log)
     provenance = {

@@ -16,7 +16,8 @@ import numpy as np
 
 from imstudies.core.metrics import Refusal
 from imstudies.lab.coders import isobmff
-from imstudies.lab.coders.vtm import _plane, _run, check_timeout_s
+from imstudies.lab.coders.process import read_plane, run_tool
+from imstudies.lab.coders.vtm import check_timeout_s
 
 
 class PackedVvc(NamedTuple):
@@ -41,7 +42,7 @@ def gpac_version(mp4box, timeout_s):
 
 def _pack(stream, heic, mp4box, timeout_s):
     cmd = [str(mp4box), "-add-image", f"{stream}:primary", "-new", str(heic)]
-    _run(cmd, timeout_s)
+    run_tool(cmd, timeout_s)
     return cmd
 
 
@@ -73,10 +74,10 @@ def pack(bitstream, recon, *, timeout_s, mp4box, gpac, decoder, work_root):
             raise RuntimeError(f"ispe of the HEIF file is {size}, expected (W, H) = {(w, h)}")
         # round trip, every call: extract, decode, compare with the recon of B05
         extract_cmd = [str(gpac), "-i", str(heic), "-o", str(back)]
-        _run(extract_cmd, timeout_s)
+        run_tool(extract_cmd, timeout_s)
         decode_cmd = [str(decoder), "-b", str(back), "-o", str(decoded), "-d", "8"]
-        _run(decode_cmd, timeout_s)
-        if not np.array_equal(_plane(decoded, h, w, "DecoderApp output after the HEIF round trip"), recon):
+        run_tool(decode_cmd, timeout_s)
+        if not np.array_equal(read_plane(decoded, h, w, "DecoderApp output after the HEIF round trip"), recon):
             raise RuntimeError("round trip failed: the stream extracted from the HEIF file decodes to another image")
         extracted = back.read_bytes()
     sizes = isobmff.top_level_sizes(file)

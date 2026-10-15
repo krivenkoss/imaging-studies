@@ -116,3 +116,20 @@ def test_e0_recipe_parity_with_cycle_3(lab):
     assert {k: hashlib.sha256(v.tobytes()).hexdigest() for k, v in ours.items()} == recorded
     with pytest.raises(ValueError):
         synthetic.e0_crop(518, 8)
+
+
+@pytest.mark.parametrize("code", ["e0", "syn517x389"])
+def test_regression_against_cycles_3_and_5(lab, tmp_path, code):
+    """B05 + B09 after moving run_tool/read_plane (cycle 6): every byte as in the run files of cycles 3 and 5."""
+    image = synthetic.e0_frame() if code == "e0" else synthetic.e0_crop(517, 389)
+    cycles = lab["cache_root"] / "cycles"
+    then3 = next(r for r in json.loads((cycles / "3" / "v2a_vtm.json").read_text(encoding="utf-8"))["rows"]
+                 if (r["image_code"], r["qp"]) == (code, 32))
+    then5 = next(r for r in json.loads((cycles / "5" / "v2e_heif.json").read_text(encoding="utf-8"))["rows"]
+                 if (r["image_code"], r["qp"]) == (code, 32))
+    coded = vtm.encode_decode(image, 32, max_pixels=image.size, level="5", frame_rate=1, timeout_s=600,
+                              work_root=tmp_path, **lab["vtm"])
+    packed = vvc_heif.pack(coded.bitstream, coded.recon, timeout_s=600, work_root=tmp_path, **_paths(lab))
+    assert hashlib.sha256(coded.bitstream).hexdigest() == then3["bitstream_sha256"]
+    assert hashlib.sha256(coded.recon.tobytes()).hexdigest() == then3["recon_sha256"]
+    assert hashlib.sha256(packed.file).hexdigest() == then5["heif_sha256"]
