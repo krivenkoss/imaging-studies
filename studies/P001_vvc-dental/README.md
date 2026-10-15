@@ -51,6 +51,8 @@ No number of the study is produced until the implementations pass these checks:
 
 > The runs are added as the study proceeds; this section lists the exact commands once they exist.
 
+Before the first run on a new machine, run `gpac` once by hand: the first start creates its key and option registry and may exit with a non-zero code.
+
 ```bash
 pytest -m core studies/P001_vvc-dental/tests
 ```

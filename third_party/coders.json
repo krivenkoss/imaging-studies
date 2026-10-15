@@ -24,7 +24,7 @@
     "folder": "gpac",
     "sha256": "7770b709f2fd1ec71bf4da8a50a4d7f0fb296ea15e81758f2758b0f65bb21381",
     "installed_to": "C:/Program Files/GPAC/ (owner, 2026-10-15)",
-    "download": "address of the installer not recorded; the installer itself is kept under coder_sources/gpac",
+    "download": "nightly builds page https://gpac.io/downloads/gpac-nightly-builds/ (found by the assistant by search 2026-10-15, the page itself not opened); the link gpac_latest_head_win64.exe points to the latest build and changes - reproducibility rests on the kept installer and its SHA-256",
     "license": "LGPL v2.1+ (MP4Box -version: distributed under LGPL v2.1+)"
   }
 }
