@@ -38,6 +38,8 @@ credentials.*
 # this repository is public, so they stay local.
 .vscode/
 *.code-workspace
+# Local JupyterLab launchers name and activate the owner's venv (a machine path).
+run_jupyterlab_*.bat
 
 .DS_Store
 Thumbs.db
