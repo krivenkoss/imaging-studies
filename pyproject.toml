@@ -18,7 +18,8 @@ dependencies = [
 [project.optional-dependencies]
 # Laboratory layer: file I/O, tables, figures. Not needed by core tests.
 lab = [
-    "pillow",
+    "pillow==12.3.0",
+    "pillow-heif==1.8.1",
     "pandas",
     "openpyxl",
     "matplotlib",
