@@ -108,3 +108,26 @@ def test_generator_does_not_import_the_package():
         elif isinstance(node, ast.ImportFrom):
             imported.add(node.module or "")
     assert imported == {"argparse", "ast", "copy", "datetime", "pathlib"}
+
+
+def test_lab_modules_are_listed_with_nested_packages(tmp_path):
+    root = _synthetic_root(tmp_path)
+    nested = root / "src" / "imstudies" / "lab" / "coders"
+    nested.mkdir(parents=True)
+    (nested / "__init__.py").write_text('"""Only a docstring."""\n', encoding="utf-8")
+    (nested / "codec.py").write_text("def encode(image, *, quality):\n    return image\n\n\n"
+                                     "def _private(x):\n    return x\n", encoding="utf-8")
+    out = api_registry.registry(root, commit="abc123")
+    assert "### `imstudies.lab.coders.codec`" in out and "- `encode(image, *, quality)`" in out
+    assert "_private" not in out and "### `imstudies.lab.coders`" not in out
+    assert out.index("### `imstudies.core.synthetic`") < out.index("### `imstudies.lab.coders.codec`")
+
+
+def test_real_lab():
+    out = api_registry.registry(ROOT, commit="test")
+    assert ("- `encode_decode(image, qp, *, max_pixels, level, frame_rate, timeout_s, encoder, decoder, cfg, "
+            "work_root)`") in out
+    assert "- `pack(bitstream, recon, *, timeout_s, mp4box, gpac, decoder, work_root)`" in out
+    for module in ("jpeg", "heif", "avif"):
+        assert f"### `imstudies.lab.coders.{module}`" in out
+    assert "### `imstudies.lab.runs`" in out and "- `git_state(root)`" in out
