@@ -8,6 +8,7 @@ import hashlib
 import re
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from typing import NamedTuple
 
@@ -29,7 +30,7 @@ class VtmResult(NamedTuple):
     provenance: dict
 
 
-def _validate(image, qp, max_pixels, level, frame_rate):
+def _validate(image, qp, max_pixels, level, frame_rate, timeout_s):
     """Validation steps (1)-(6) of B05; nothing is written before they pass."""
     if not isinstance(image, np.ndarray) or image.ndim != 2:
         raise Refusal("not_2d", f"expected a 2-D numpy array, got {type(image).__name__}")
@@ -38,7 +39,9 @@ def _validate(image, qp, max_pixels, level, frame_rate):
     h, w = image.shape
     if h < 8 or w < 8:
         raise Refusal("image_too_small", f"{h}x{w}, each side must be >= 8")
-    for name, value in (("qp", qp), ("max_pixels", max_pixels), ("level", level), ("frame_rate", frame_rate)):
+    explicit = (("qp", qp), ("max_pixels", max_pixels), ("level", level), ("frame_rate", frame_rate),
+                ("timeout_s", timeout_s))
+    for name, value in explicit:  # None for timeout_s would silently mean "no limit"
         if value is None:
             raise Refusal("parameter_not_assigned", name)
     if isinstance(qp, bool) or not isinstance(qp, (int, np.integer)) or not QP_MIN <= qp <= QP_MAX:
@@ -47,9 +50,18 @@ def _validate(image, qp, max_pixels, level, frame_rate):
         raise Refusal("image_too_large", f"{h}x{w} = {h * w} pixels > max_pixels = {max_pixels}")
 
 
-def _run(cmd):
-    """Run an executable; a non-zero exit is a failure (status `error`), never a refusal."""
-    out = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
+def _tail(text, n=1500):
+    return text[-n:] if text else "(no output)"
+
+
+def _run(cmd, timeout_s):
+    """Run an executable; a non-zero exit or the time limit is a failure (status `error`), never a refusal."""
+    started = time.perf_counter()
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, errors="replace", timeout=timeout_s)
+    except subprocess.TimeoutExpired as exc:
+        raise TimeoutError(f"{Path(cmd[0]).name} exceeded timeout_s={timeout_s}: "
+                           f"{time.perf_counter() - started:.1f} s elapsed; command: {cmd}") from exc
     if out.returncode != 0:
         raise subprocess.CalledProcessError(out.returncode, cmd, output=out.stdout[-2000:], stderr=out.stderr[-2000:])
     return out.stdout
@@ -66,9 +78,9 @@ def _sha256(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def encode_decode(image, qp, *, max_pixels, level, frame_rate, encoder, decoder, cfg, work_root):
+def encode_decode(image, qp, *, max_pixels, level, frame_rate, timeout_s, encoder, decoder, cfg, work_root):
     """Encode `image` with EncoderApp at `qp`, decode with DecoderApp - contract ../REFERENCE.md#b05."""
-    _validate(image, qp, max_pixels, level, frame_rate)
+    _validate(image, qp, max_pixels, level, frame_rate, timeout_s)
     encoder, decoder, cfg = (Path(p).resolve() for p in (encoder, decoder, cfg))  # CreateProcess wants absolute
     for name, path in (("EncoderApp", encoder), ("DecoderApp", decoder), ("cfg", cfg)):
         if not path.is_file():
@@ -83,20 +95,26 @@ def encode_decode(image, qp, *, max_pixels, level, frame_rate, encoder, decoder,
                   *(f"--{key}={value}" for key, value in BIT_DEPTHS.items()),
                   "--InputChromaFormat=400", "--ChromaFormatIDC=400", f"--SourceWidth={w}", f"--SourceHeight={h}",
                   "--FramesToBeEncoded=1", f"--QP={int(qp)}", f"--Level={level}", f"--FrameRate={frame_rate}"]
-        log = _run(encode)
-        decode = [str(decoder), "-b", str(stream), "-o", str(recon), "-d", "8"]
-        dec_log = _run(decode)
-        if not stream.is_file():
-            raise RuntimeError("EncoderApp wrote no bitstream")
+        log = _run(encode, timeout_s)
+        version = re.search(r"VTM Encoder Version[^\r\n]*", log)
+        if version is None:
+            raise RuntimeError(f"EncoderApp printed no 'VTM Encoder Version' line; output tail: {_tail(log)}")
+        if not stream.is_file() or stream.stat().st_size == 0:  # before DecoderApp: the failure is the encoder's
+            raise RuntimeError(f"EncoderApp wrote no bitstream or an empty one ({stream.name}); "
+                               f"output tail: {_tail(log)}")
         bitstream = stream.read_bytes()
+        decode = [str(decoder), "-b", str(stream), "-o", str(recon), "-d", "8"]
+        dec_log = _run(decode, timeout_s)
         result_recon = _plane(recon, h, w, "DecoderApp output")
         result_enc_recon = _plane(enc_recon, h, w, "EncoderApp reconstruction")
     psnr_y = re.search(r"\[Y\s+([-+0-9.eEinf]+)\s+dB", log)
+    dec_version = re.search(r"VTM Decoder Version[^\r\n]*", dec_log)
     provenance = {
-        "encoder_version": re.search(r"VTM Encoder Version[^\r\n]*", log).group(0).strip(),
-        "decoder_version": (m.group(0).strip() if (m := re.search(r"VTM Decoder Version[^\r\n]*", dec_log)) else None),
+        "encoder_version": version.group(0).strip(),
+        "decoder_version": dec_version.group(0).strip() if dec_version else None,
         "encoder_sha256": _sha256(encoder), "decoder_sha256": _sha256(decoder), "cfg_sha256": _sha256(cfg),
-        "encoder_command": encode, "decoder_command": decode, "qp": int(qp), "level": str(level), "frame_rate": frame_rate,
+        "encoder_command": encode, "decoder_command": decode, "qp": int(qp), "level": str(level),
+        "frame_rate": frame_rate, "timeout_s": timeout_s,
         "bit_depths": dict(BIT_DEPTHS, DecoderOutputBitDepth=8), "chroma_format": "400",
     }
     return VtmResult(bitstream, result_recon, result_enc_recon, float(psnr_y.group(1)) if psnr_y else None, provenance)
