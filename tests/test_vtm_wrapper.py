@@ -73,6 +73,24 @@ def test_refusals_before_the_coder_and_their_order(tmp_path):
     assert list(tmp_path.iterdir()) == []
 
 
+@pytest.mark.parametrize("timeout_s", [0, -1, True, np.bool_(True), "5", float("inf"), float("nan"), 0.0])
+def test_timeout_value_is_refused_before_any_file(tmp_path, timeout_s):
+    good = _frame(16, 16)
+    assert _reason(good, timeout_s=timeout_s, work_root=tmp_path) == "parameter_out_of_range"
+    assert _reason(good, timeout_s=timeout_s, max_pixels=1, work_root=tmp_path) == "parameter_out_of_range"  # (5) < (6)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_timeout_600_reproduces_cycle_3(coder, tmp_path):
+    paths = json.loads((ROOT / "lab_paths.json").read_text(encoding="utf-8"))
+    run3 = json.loads(((ROOT / paths["cache_root"]).resolve() / "cycles" / "3" / "v2a_vtm.json").read_text(encoding="utf-8"))
+    then = next(r for r in run3["rows"] if (r["image_code"], r["qp"]) == ("e0", 32))
+    result = _call(_frame(512, 512), qp=32, max_pixels=512 * 512, timeout_s=600, paths=coder, work_root=tmp_path)
+    assert hashlib.sha256(result.bitstream).hexdigest() == then["bitstream_sha256"]
+    assert hashlib.sha256(result.recon.tobytes()).hexdigest() == then["recon_sha256"]
+    assert result.provenance["timeout_s"] == 600
+
+
 def test_missing_executable_is_refused_in_words(tmp_path):
     with pytest.raises(FileNotFoundError, match="EncoderApp not found"):
         _call(_frame(16, 16), work_root=tmp_path)

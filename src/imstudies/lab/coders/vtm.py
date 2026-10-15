@@ -5,6 +5,7 @@ Executables are our builds of tools/build_coders.ps1; their paths come from lab_
 """
 
 import hashlib
+import math
 import re
 import subprocess
 import tempfile
@@ -30,6 +31,14 @@ class VtmResult(NamedTuple):
     provenance: dict
 
 
+def check_timeout_s(timeout_s):
+    """Step (5) of B05 for timeout_s, shared with B09: a positive finite number, not bool."""
+    is_number = (isinstance(timeout_s, (int, float, np.integer, np.floating))
+                 and not isinstance(timeout_s, (bool, np.bool_)))
+    if not is_number or not math.isfinite(timeout_s) or timeout_s <= 0:
+        raise Refusal("parameter_out_of_range", f"timeout_s={timeout_s!r}, allowed: a positive finite number of seconds")
+
+
 def _validate(image, qp, max_pixels, level, frame_rate, timeout_s):
     """Validation steps (1)-(6) of B05; nothing is written before they pass."""
     if not isinstance(image, np.ndarray) or image.ndim != 2:
@@ -46,6 +55,7 @@ def _validate(image, qp, max_pixels, level, frame_rate, timeout_s):
             raise Refusal("parameter_not_assigned", name)
     if isinstance(qp, bool) or not isinstance(qp, (int, np.integer)) or not QP_MIN <= qp <= QP_MAX:
         raise Refusal("parameter_out_of_range", f"qp={qp!r}, allowed integers {QP_MIN}..{QP_MAX}")
+    check_timeout_s(timeout_s)
     if h * w > max_pixels:
         raise Refusal("image_too_large", f"{h}x{w} = {h * w} pixels > max_pixels = {max_pixels}")
 
