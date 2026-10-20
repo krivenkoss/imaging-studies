@@ -209,20 +209,7 @@ def build_copy(images_root, data_root, private_root, v1_codes, v1_crops, state, 
         log(line)
 
     pngs = {img["code"]: png_bytes(img["values"]) for img in images}
-    if leak_count(list(pngs.values()), names):
-        raise RunRefusal("a PNG carries a source name: nothing written")
     link, by_file = link_v1(images, v1_codes, v1_crops)
-    out_dir.mkdir(parents=True)
-    for img in images:
-        path = out_dir / f"{img['code']}.png"
-        with open(path, "xb") as f:
-            f.write(pngs[img["code"]])
-        with Image.open(path) as im:
-            back_mode, back = im.mode, np.asarray(im)
-        if back_mode != "L" or not np.array_equal(back, img["values"]):
-            raise RuntimeError(f"{img['code']}: the PNG read back differs from the source pixels")
-        say(f"  {img['code']}: {img['values'].shape[0]} x {img['values'].shape[1]}, {img['kind']}, "
-            f"source files {len(img['copies'])}, full 512 tiles {tiles(*img['values'].shape)['full_tiles']}")
     registry = {
         "_what": "Registry of the P001 set (contract B10): one entry per unique image under its code; no source names "
                  "or paths - the code table lives outside the project.",
@@ -244,8 +231,21 @@ def build_copy(images_root, data_root, private_root, v1_codes, v1_crops, state, 
         "v1_link_confirmed_by_file_sha256": by_file,
     }
     text = json.dumps(registry, ensure_ascii=False, indent=1)
-    if leak_count([text.encode("utf-8"), "\n".join(console).encode("utf-8")], names):
-        raise RunRefusal("the registry or the console carries a source name: registry and code table not written")
+    if leak_count([text.encode("utf-8")] + list(pngs.values()), names):
+        raise RunRefusal("the registry or a PNG carries a source name: nothing written")
+    out_dir.mkdir(parents=True)
+    for img in images:
+        path = out_dir / f"{img['code']}.png"
+        with open(path, "xb") as f:
+            f.write(pngs[img["code"]])
+        with Image.open(path) as im:
+            back_mode, back = im.mode, np.asarray(im)
+        if back_mode != "L" or not np.array_equal(back, img["values"]):
+            raise RuntimeError(f"{img['code']}: the PNG read back differs from the source pixels")
+        say(f"  {img['code']}: {img['values'].shape[0]} x {img['values'].shape[1]}, {img['kind']}, "
+            f"source files {len(img['copies'])}, full 512 tiles {tiles(*img['values'].shape)['full_tiles']}")
+    if leak_count(["\n".join(console).encode("utf-8")], names):
+        raise RunRefusal("the console carries a source name: registry and code table not written")
     registry_path.parent.mkdir(exist_ok=True)
     with open(registry_path, "x", encoding="utf-8", newline="\n") as f:
         f.write(text + "\n")

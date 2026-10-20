@@ -228,6 +228,15 @@ def test_v1_code_not_found_is_a_stop(p001, dirs):
     assert not (dirs["data"] / "P001").exists()
 
 
+def test_registry_carrying_a_source_name_writes_nothing(p001, dirs, monkeypatch):
+    root = make_set(dirs["images"])
+    monkeypatch.setattr(p001, "CONTRACT", f"B10 0.1.0 {PATIENT} 05")  # a source stem inside the registry text
+    with pytest.raises(p001.RunRefusal, match="the registry or a PNG carries a source name: nothing written"):
+        p001.build_copy(root, dirs["data"], dirs["private"], *v1_for(p001, root), STATE)
+    assert not (dirs["data"] / "P001").exists() and not (dirs["data"] / "registry").exists()
+    assert not (dirs["private"] / "P001_codes.json").exists()
+
+
 def test_leak_count_both_sides(p001):
     name = PATIENT + " 03.bmp"
     assert p001.leak_count([b"code D03, 512 x 512"], [name]) == 0
