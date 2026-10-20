@@ -31,7 +31,7 @@ def test_private_root_must_lie_outside_the_project(run_copy, tmp_path, monkeypat
     monkeypatch.setattr(run_copy, "PROJECT", project)
     base = {"images_root": "../Images", "data_root": "../data", "cache_root": "../tmp/lab_cache"}
     paths = core / "lab_paths.json"
-    paths.write_text(json.dumps(base | {"private_root": "../P001_private"}), encoding="utf-8")
+    paths.write_text(json.dumps(base | {"private_root": "../codes_inside_the_project"}), encoding="utf-8")
     with pytest.raises(run_copy.RunRefusal, match="private_root lies inside the project folder"):
         run_copy.load_paths()
     paths.write_text(json.dumps(base | {"private_root": "<folder outside the project>"}), encoding="utf-8")
