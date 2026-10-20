@@ -12,6 +12,7 @@
   "coder_sources": "../other/sources/coders",
   "v3a_reference": "<path to the assistant's V3-a reference v3a_ijg9e.json>",
   "v3b_v4_reference": "<path to the assistant's V3-b/V4 reference v3b_v4_reference.json>",
+  "avif_libheif_python": "<python.exe of a venv outside the project with pillow-heif 0.22.0 (AVIF through libheif)>",
   "coders": {
     "_note": "Path to each external coder executable; the version is recorded by the wrapper, not here.",
     "vtm": {
