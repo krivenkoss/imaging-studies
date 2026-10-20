@@ -1,17 +1,17 @@
-"""Lab tests of imstudies.lab.p001, the adapter of the P001 set (contract ../REFERENCE.md#b10), on synthetic BMP.
+"""Lab tests of imstudies.lab.p001, the adapter of the P001 set (contract ../REFERENCE.md#b10 0.2.0), on synthetic BMP and PNG.
 
 No medical file is used: the sets are built in tmp_path from random pixels under invented names. Both sides
 of every decision are checked: grey palette (identity ramp and not) and a palette with colour on an
-unused index are read, colour on a used index is refused; 8-bit without a table is read as is, 24 and
-16 bit are refused; a duplicate is one unit, the same name with other pixels is not a duplicate; 16
-unique images are copied, 15 and 17 are refused; existing outputs are refused; the input limit is
+unused index are read, colour on a used index is refused; 8-bit BMP without a table is read as is, 24 and
+16 bit are refused; PNG of a grey palette and of L are read, RGB, LA, 16-bit grey, tRNS and a colour
+palette are refused; a BMP-PNG duplicate is one unit, the same name with other pixels is not a duplicate;
+16 unique images are copied, 15 and 17 are refused; existing outputs are refused; the input limit is
 checked on both sides; the V1 link by crop pixels; the leak count on both sides. The oracle of the
 reader is Pillow's own decoding with a numpy palette lookup.
 """
 
 import hashlib
 import json
-import shutil
 import struct
 from pathlib import Path
 
@@ -33,6 +33,15 @@ def write_palette_bmp(path, idx, palette):
     im = Image.fromarray(idx.astype(np.uint8), "P")
     im.putpalette(palette)
     im.save(path, "BMP")
+    return path
+
+
+def write_palette_png(path, idx, palette, **save_args):
+    from PIL import Image
+
+    im = Image.fromarray(idx.astype(np.uint8), "P")
+    im.putpalette(palette)
+    im.save(path, "PNG", **save_args)
     return path
 
 
@@ -59,14 +68,23 @@ def pillow_values(path):
 
 
 def make_set(root, n_panorama=15, seed=0):
-    """images_root with n_panorama palette BMPs (one 520 x 530 for the V1 link) and Dental_raw/dental2.bmp."""
+    """images_root with n_panorama sources in the panorama folder - palette BMPs (one 520 x 530 for the V1 link),
+    source 01 a palette PNG and source 02 an L PNG, as in the real folder - and Dental_raw/dental2.bmp."""
+    from PIL import Image
+
     rng = np.random.default_rng(seed)
     pano, raw = root / "Dental_panorama_original", root / "Dental_raw"
     pano.mkdir(parents=True)
     raw.mkdir()
     for k in range(n_panorama):
         shape = (520, 530) if k == 0 else (12, 16 + k)
-        write_palette_bmp(pano / f"{PATIENT} {k:02d}.bmp", rng.integers(0, 60, shape), grey_palette(k))
+        idx = rng.integers(0, 60, shape)
+        if k == 1:
+            write_palette_png(pano / f"{PATIENT} {k:02d}.png", idx, grey_palette(k))
+        elif k == 2:
+            Image.fromarray(idx.astype(np.uint8), "L").save(pano / f"{PATIENT} {k:02d}.png", "PNG")
+        else:
+            write_palette_bmp(pano / f"{PATIENT} {k:02d}.bmp", idx, grey_palette(k))
     write_palette_bmp(raw / "dental2.bmp", rng.integers(0, 60, (14, 18)), grey_palette())
     write_palette_bmp(raw / "dental1.bmp", rng.integers(0, 60, (14, 18)), grey_palette())  # not a B10 source
     (pano / f"{PATIENT} 00.txt").write_text("not an image", encoding="utf-8")
@@ -148,10 +166,44 @@ def test_input_limit_both_sides(p001, tmp_path):
     side = int(p001.MAX_PIXELS ** 0.5)  # side * side <= MAX_PIXELS < (side + 1) ** 2
     Image.new("L", (side, side)).save(tmp_path / "ok.bmp", "BMP")
     Image.new("L", (side + 1, side + 1)).save(tmp_path / "big.bmp", "BMP")
-    (values, kind), = p001.read_sources(tmp_path, ["ok.bmp"])
+    (values, kind, fmt), = p001.read_sources(tmp_path, ["ok.bmp"])
     assert values.shape == (side, side)
     with pytest.raises(p001.RunRefusal, match=rf"source 2 of 2: {side + 1}x{side + 1} = \d+ pixels > the B10 limit"):
         p001.read_sources(tmp_path, ["ok.bmp", "big.bmp"])
+
+
+def test_png_kinds_both_sides(p001, tmp_path):
+    from PIL import Image
+
+    idx = np.random.default_rng(2).integers(0, 40, (7, 13)).astype(np.uint8)
+    grey = write_palette_png(tmp_path / "grey.png", idx, grey_palette(5))
+    src = p001.Png8(grey.read_bytes())
+    lookup = np.array(grey_palette(5), dtype=np.uint8).reshape(-1, 3)[idx, 0]
+    assert (src.kind, src.fmt) == ("palette", "png") and np.array_equal(src.values(), lookup)
+    assert np.array_equal(lookup, pillow_values(grey))
+    Image.fromarray(idx, "L").save(tmp_path / "l.png", "PNG")
+    src = p001.Png8((tmp_path / "l.png").read_bytes())
+    assert (src.kind, src.fmt) == ("gray8", "png") and np.array_equal(src.values(), idx)
+    palette = grey_palette()
+    palette[3 * 200:3 * 200 + 3] = [255, 0, 0]  # colour on an unused index: read
+    assert p001.Png8(write_palette_png(tmp_path / "unused.png", idx, palette).read_bytes()).kind == "palette"
+    palette[3 * int(idx[0, 0]):3 * int(idx[0, 0]) + 3] = [90, 91, 90]  # colour on a used index: refused
+    with pytest.raises(ValueError, match="palette is not grey on the indices the image uses"):
+        p001.Png8(write_palette_png(tmp_path / "used.png", idx, palette).read_bytes())
+    Image.fromarray(np.zeros((5, 6, 3), np.uint8), "RGB").save(tmp_path / "rgb.png", "PNG")
+    with pytest.raises(ValueError, match="PNG of RGB colour: only grey or a grey palette is read"):
+        p001.Png8((tmp_path / "rgb.png").read_bytes())
+    Image.new("LA", (6, 5)).save(tmp_path / "la.png", "PNG")
+    with pytest.raises(ValueError, match="PNG of grey with alpha"):
+        p001.Png8((tmp_path / "la.png").read_bytes())
+    Image.fromarray(np.zeros((5, 6), np.uint16)).save(tmp_path / "g16.png", "PNG")
+    with pytest.raises(ValueError, match="16-bit grey PNG: only 8-bit grey is read"):
+        p001.Png8((tmp_path / "g16.png").read_bytes())
+    trns = write_palette_png(tmp_path / "trns.png", idx, grey_palette(), transparency=0)
+    with pytest.raises(ValueError, match=r"PNG with transparency \(tRNS\)"):
+        p001.Png8(trns.read_bytes())
+    with pytest.raises(p001.RunRefusal, match="source 2 of 2: PNG of RGB colour"):
+        p001.read_sources(tmp_path, ["l.png", "rgb.png"])
 
 
 def test_refusal_names_the_index_not_the_file(p001, dirs):
@@ -166,9 +218,11 @@ def test_refusal_names_the_index_not_the_file(p001, dirs):
 
 
 def test_copy_of_sixteen_with_duplicate_and_same_name(p001, dirs):
+    from PIL import Image
+
     root = make_set(dirs["images"], n_panorama=14)
     pano = root / "Dental_panorama_original"
-    shutil.copy(pano / f"{PATIENT} 03.bmp", pano / "copy without the name.bmp")  # duplicate
+    Image.fromarray(pillow_values(pano / f"{PATIENT} 03.bmp"), "L").save(pano / "copy without the name.png")  # BMP-PNG
     write_palette_bmp(pano / "dental2.bmp", np.full((9, 9), 7, np.uint8), grey_palette())  # same name, other pixels
     lines = []
     registry, leaks = p001.build_copy(root, dirs["data"], dirs["private"], *v1_for(p001, root), STATE, log=lines.append)
@@ -188,9 +242,12 @@ def test_copy_of_sixteen_with_duplicate_and_same_name(p001, dirs):
     source = pillow_values(pano / f"{PATIENT} 03.bmp")
     copy = next(i for i in registry["images"] if i["pixels_sha256"] == hashlib.sha256(source.tobytes()).hexdigest())
     assert copy["n_source_files"] == 2 and np.array_equal(pillow_values(dirs["data"] / "P001" / f"{copy['code']}.png"), source)
+    assert (copy["source_kind"], copy["source_format"]) == ("gray8+palette", "bmp+png")
+    formats = {(i["source_kind"], i["source_format"]) for i in registry["images"]}
+    assert {("palette", "bmp"), ("palette", "png"), ("gray8", "png")} <= formats
     table = json.loads((dirs["private"] / "P001_codes.json").read_text(encoding="utf-8"))["codes"]
     assert sorted(c["path"] for c in table[copy["code"]]) == sorted(
-        ["Dental_panorama_original/copy without the name.bmp", f"Dental_panorama_original/{PATIENT} 03.bmp"])
+        ["Dental_panorama_original/copy without the name.png", f"Dental_panorama_original/{PATIENT} 03.bmp"])
     assert leaks == 0 and p001.leak_count(["\n".join(lines).encode("utf-8")], [PATIENT + ".bmp", "dental2.bmp"]) == 0
     registry_text = (dirs["data"] / "registry" / "P001.json").read_text(encoding="utf-8")
     assert "Dental_panorama_original" not in registry_text and "dental2" not in registry_text

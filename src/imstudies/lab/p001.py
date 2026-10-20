@@ -1,14 +1,16 @@
 """Adapter of the P001 set (B10): a copy of the dental sources under codes D01..., the set registry and the code table.
 
-Contract: ../REFERENCE.md#b10 (one level above this repository). Reads the declared 8-bit BMP sources,
-drops exact duplicates, assigns codes by ascending pixels_sha256 and writes data/P001/DNN.png,
+Contract: ../REFERENCE.md#b10 (one level above this repository), version 0.2.0. Reads the declared
+8-bit BMP and PNG sources, drops exact duplicates, assigns codes by ascending pixels_sha256 and writes data/P001/DNN.png,
 data/registry/P001.json and <private_root>/P001_codes.json. Refusals, the registry and the console
 carry codes and source indices (1-based, in the sorted list of source paths), never source names or
 paths; only the code table outside the project holds them.
 
 The BMP is read here, not by Pillow: Pillow turns an 8-bit BMP with a grey ramp palette into mode L
 and misreads an 8-bit BMP without a colour table, so the kind of the source (palette / gray8) would
-be lost. Only uncompressed 8-bit BMP is read; anything else is refused in words. pixels_sha256 is the
+be lost. Only uncompressed 8-bit BMP is read; anything else is refused in words. A PNG is read by Pillow
+after its header is checked: grey of 8 bit (L) or a palette (P) grey on the indices the image uses;
+colour, alpha (including tRNS) and 16 bit are refused in words. pixels_sha256 is the
 sha256 of the C-order uint8 bytes (as in the run files of cycles 1, 3, 5); a duplicate has the same
 shape and the same pixels_sha256.
 """
@@ -25,7 +27,7 @@ from PIL import Image, features
 
 from imstudies.lab.runs import RunRefusal, sha256_file
 
-CONTRACT = "B10 0.1.0"
+CONTRACT = "B10 0.2.0"
 PANORAMA_DIR = "Dental_panorama_original"
 EXTRA_SOURCE = "Dental_raw/dental2.bmp"
 N_UNIQUE = 16
@@ -34,6 +36,9 @@ TILE = 512
 V1_CROP = 512  # the centre crop of the V1 dental images (run_v1.py, cycle 1)
 PNG_ARGS = {"compress_level": 6, "optimize": False}
 PNG_CHUNKS = {"IHDR", "IDAT", "IEND"}
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+PNG_COLOUR = {0: "grey", 2: "RGB colour", 3: "palette", 4: "grey with alpha", 6: "RGB colour with alpha"}
+SOURCE_SUFFIXES = (".bmp", ".png")
 
 
 def source_paths(images_root):
@@ -42,7 +47,7 @@ def source_paths(images_root):
     folder = root / PANORAMA_DIR
     if not folder.is_dir():
         raise RunRefusal(f"the panorama folder of B10 is missing under images_root: {PANORAMA_DIR}")
-    rels = [f"{PANORAMA_DIR}/{p.name}" for p in folder.iterdir() if p.is_file() and p.suffix.lower() == ".bmp"]
+    rels = [f"{PANORAMA_DIR}/{p.name}" for p in folder.iterdir() if p.is_file() and p.suffix.lower() in SOURCE_SUFFIXES]
     if not (root / EXTRA_SOURCE).is_file():
         raise RunRefusal("the extra source of B10 in Dental_raw is missing under images_root")
     return sorted(rels + [EXTRA_SOURCE])
@@ -50,6 +55,8 @@ def source_paths(images_root):
 
 class Bmp8:
     """An uncompressed 8-bit BMP: pixel indices (a view of the file bytes) and the colour table, if any."""
+
+    fmt = "bmp"
 
     def __init__(self, data):
         if len(data) < 54 or data[:2] != b"BM":
@@ -90,33 +97,79 @@ class Bmp8:
         return np.ascontiguousarray(self.index)
 
 
+class Png8:
+    """A PNG of 8-bit grey (mode L) or of a palette (mode P) grey on the indices the image uses.
+
+    Unlike Bmp8 the pixels are decoded before the input limit is checked (Pillow decodes the whole image;
+    its own decompression-bomb guard applies first)."""
+
+    fmt = "png"
+
+    def __init__(self, data):
+        if data[:8] != PNG_SIGNATURE or png_chunk_types(data)[:1] != ["IHDR"]:
+            raise ValueError("not a PNG file")
+        width, height, depth, colour = struct.unpack_from(">IIBB", data, 16)
+        if colour not in (0, 3):
+            raise ValueError(f"PNG of {PNG_COLOUR.get(colour, f'colour type {colour}')}: only grey or a grey palette "
+                             f"is read")
+        if colour == 0 and depth != 8:
+            raise ValueError(f"{depth}-bit grey PNG: only 8-bit grey is read")
+        if "tRNS" in png_chunk_types(data):
+            raise ValueError("PNG with transparency (tRNS): alpha is not read")
+        with Image.open(io.BytesIO(data)) as im:
+            im.load()
+            mode, index = im.mode, np.asarray(im)
+            palette = im.getpalette() if mode == "P" else None
+        expected = "L" if colour == 0 else "P"
+        if mode != expected or index.shape != (height, width):
+            raise ValueError(f"PNG decoded as mode {mode} {index.shape}, expected {expected} {(height, width)}")
+        self.h, self.w = height, width
+        self.kind = "gray8" if colour == 0 else "palette"
+        if colour == 3:
+            table = np.array(palette, dtype=np.uint8).reshape(-1, 3)
+            used = np.flatnonzero(np.bincount(index.ravel(), minlength=256))
+            if used.max() >= len(table):
+                raise ValueError("a pixel index lies outside the colour table")
+            r, g, b = table[used].T
+            if not ((r == g).all() and (g == b).all()):
+                raise ValueError("the palette is not grey on the indices the image uses")
+            self._values = table[:, 0][index]
+        else:
+            self._values = index
+
+    def values(self):
+        return np.ascontiguousarray(self._values, dtype=np.uint8)
+
+
 def read_sources(images_root, rels):
-    """Every source parsed and checked (bit depth, grey palette), then the input limit, then the pixels."""
+    """Every source parsed and checked (format, bit depth, grey palette), then the input limit, then the pixels."""
     parsed = []
     for n, rel in enumerate(rels, start=1):
         try:
             data = (Path(images_root) / rel).read_bytes()
-            parsed.append(Bmp8(data))
+            parsed.append(Png8(data) if rel.lower().endswith(".png") else Bmp8(data))
         except OSError as exc:
-            raise RunRefusal(f"source {n} of {len(rels)}: cannot be read ({exc.strerror})") from None
-        except ValueError as exc:
+            raise RunRefusal(f"source {n} of {len(rels)}: cannot be read ({exc.strerror or type(exc).__name__})") from None
+        except (ValueError, SyntaxError, Image.DecompressionBombError) as exc:
             raise RunRefusal(f"source {n} of {len(rels)}: {exc}") from None
     for n, bmp in enumerate(parsed, start=1):
         if bmp.h * bmp.w > MAX_PIXELS:
             raise RunRefusal(f"source {n} of {len(rels)}: {bmp.h}x{bmp.w} = {bmp.h * bmp.w} pixels > the B10 limit "
                              f"{MAX_PIXELS}")
-    return [(bmp.values(), bmp.kind) for bmp in parsed]
+    return [(src.values(), src.kind, src.fmt) for src in parsed]
 
 
 def unique_images(images_root, rels, read):
     """Images distinct by shape and pixels_sha256, coded D01... by ascending pixels_sha256."""
     groups = {}
-    for n, (rel, (values, kind)) in enumerate(zip(rels, read), start=1):
+    for n, (rel, (values, kind, fmt)) in enumerate(zip(rels, read), start=1):
         key = (values.shape, hashlib.sha256(values.tobytes()).hexdigest())
-        entry = groups.setdefault(key, {"values": values, "kind": kind, "pixels_sha256": key[1], "copies": []})
-        if entry["kind"] != kind:
-            entry["kind"] = f"{entry['kind']}+{kind}"
-        entry["copies"].append({"index": n, "path": rel, "file_sha256": sha256_file(Path(images_root) / rel)})
+        entry = groups.setdefault(key, {"values": values, "pixels_sha256": key[1], "copies": []})
+        entry["copies"].append({"index": n, "path": rel, "kind": kind, "format": fmt,
+                                "file_sha256": sha256_file(Path(images_root) / rel)})
+    for entry in groups.values():  # a unit whose copies differ in kind or format names both
+        entry["kind"] = "+".join(sorted({c["kind"] for c in entry["copies"]}))
+        entry["format"] = "+".join(sorted({c["format"] for c in entry["copies"]}))
     if len(groups) != N_UNIQUE:
         raise RunRefusal(f"{len(groups)} unique images from {len(rels)} source files ({len(rels) - len(groups)} "
                          f"duplicates); B10 expects {N_UNIQUE}")
@@ -224,7 +277,7 @@ def build_copy(images_root, data_root, private_root, v1_codes, v1_crops, state, 
         "limit_pixels": MAX_PIXELS,
         "images": [{"code": img["code"], "H": img["values"].shape[0], "W": img["values"].shape[1],
                     "pixels_sha256": img["pixels_sha256"], "png_sha256": hashlib.sha256(pngs[img["code"]]).hexdigest(),
-                    "source_kind": img["kind"], "n_source_files": len(img["copies"]), "class": "orthopantomogram",
+                    "source_kind": img["kind"], "source_format": img["format"], "n_source_files": len(img["copies"]), "class": "orthopantomogram",
                     "role": "check", **tiles(*img["values"].shape),
                     "v1_codes": sorted(k for k, v in link.items() if v == img["code"])} for img in images],
         "v1_link": link,
@@ -242,7 +295,7 @@ def build_copy(images_root, data_root, private_root, v1_codes, v1_crops, state, 
             back_mode, back = im.mode, np.asarray(im)
         if back_mode != "L" or not np.array_equal(back, img["values"]):
             raise RuntimeError(f"{img['code']}: the PNG read back differs from the source pixels")
-        say(f"  {img['code']}: {img['values'].shape[0]} x {img['values'].shape[1]}, {img['kind']}, "
+        say(f"  {img['code']}: {img['values'].shape[0]} x {img['values'].shape[1]}, {img['kind']}, {img['format']}, "
             f"source files {len(img['copies'])}, full 512 tiles {tiles(*img['values'].shape)['full_tiles']}")
     if leak_count(["\n".join(console).encode("utf-8")], names):
         raise RunRefusal("the console carries a source name: registry and code table not written")
