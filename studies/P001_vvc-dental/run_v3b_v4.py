@@ -25,7 +25,7 @@ import imstudies
 from imstudies.core.metrics import Refusal, psnr
 from imstudies.lab.coders import avif, heif, isobmff, jpeg
 from imstudies.lab.images import load_test_images
-from imstudies.lab.runs import RunRefusal, git_state, sha256_file
+from imstudies.lab.runs import RunRefusal, git_state, json_number, sha256_file
 
 STUDY = Path(__file__).resolve().parent
 ROOT = STUDY.parents[1]
@@ -193,6 +193,17 @@ def crossing(qs, values, target, q_ref):
     if not found:
         return None, 0
     return min(found, key=lambda x: (abs(x - q_ref), x)), len(found)
+
+
+def _jsonable(obj):
+    """Non-finite floats as the strings of json_number ('+inf' for PSNR at zero MSE, B02), recursively."""
+    if isinstance(obj, float):
+        return json_number(obj)
+    if isinstance(obj, dict):
+        return {k: _jsonable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_jsonable(v) for v in obj]
+    return obj
 
 
 def _stats(values):
@@ -462,8 +473,9 @@ def run(paths, reference, images, plan, out_dir, state):
         "as25_reference": reference["as25_table1_heif_cr"], "comparison": comparison,
         "verdicts": verdicts(comparison),
     }
+    text = json.dumps(_jsonable(record), ensure_ascii=False, indent=1, allow_nan=False)  # before the file is opened
     with open(run_path, "x", encoding="utf-8", newline="\n") as f:
-        json.dump(record, f, ensure_ascii=False, indent=1, allow_nan=False)
+        f.write(text)
     build_book(run_path, book_path)
     print_verdicts(record, run_path, book_path)
     return run_path, book_path

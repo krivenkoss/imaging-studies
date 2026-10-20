@@ -3,8 +3,9 @@
 - the OOP rule, the crossing rule of the steep zone and the noise rule against hand-computed truths;
 - a reference copy with one changed number is refused by its sha256; a bad row is refused by section
   and index;
-- a run on one small configuration writes its run file and a book equal to it cell by cell, and
-  refuses by name the second time; the cell check refuses a changed cell.
+- a run on one small configuration (AVIF 100 is lossless: PSNR_nc = +inf, written as "+inf") writes
+  its run file and a book equal to it cell by cell, and refuses by name the second time; the cell
+  check refuses a changed cell.
 """
 
 import importlib.util
@@ -91,7 +92,7 @@ def test_run_on_one_small_configuration(v3b, setup, tmp_path):
     paths, images = setup
     reference = v3b.load_reference(paths["v3b_v4_reference"])
     frisco = [img for img in images if img["code"] == "frisco"]
-    plan = {"sigma2": (25,), "seeds": (1,), "qualities": {"jpeg": (44, 48, 52), "heif": (29, 33, 37), "avif": (47, 51, 55)}}
+    plan = {"sigma2": (25,), "seeds": (1,), "qualities": {"jpeg": (44, 48, 52), "heif": (29, 33, 37), "avif": (47, 51, 100)}}
     state = {"core_commit": "test", "core_tree": "test"}
     run_path, book_path = v3b.run(paths, reference, frisco, plan, tmp_path, state)
     record = json.loads(run_path.read_text(encoding="utf-8"))
@@ -105,6 +106,8 @@ def test_run_on_one_small_configuration(v3b, setup, tmp_path):
     for c in record["curves"]:
         mine = [r for r in rows if r["codec"] == c["codec"]]
         assert c["psnr_max_db"] == max(r["psnr_tc_db"] for r in mine)
+    lossless = next(r for r in rows if (r["codec"], r["qf"]) == ("avif", 100))  # AVIF 100 is lossless
+    assert lossless["psnr_nc_db"] == "+inf" and isinstance(lossless["psnr_tc_db"], float)
     v3b_rows = [c for c in record["comparison"] if c["check"] == "V3-b" and c["sigma2"] == 25 and c["image"] == "frisco"]
     assert len(v3b_rows) == 3 and all(c["n_seeds"] == 1 and c["in_tolerance"] in (True, False) for c in v3b_rows)
     assert record["verdicts"]["V3-b"]["rows_without_data"] == 3  # the other three JPEG rows of the reference
