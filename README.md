@@ -107,7 +107,7 @@ pytest -m core
   author      = {Kryvenko, S. S.},
   title       = {imaging-studies: reproducible studies in lossy image compression and denoising},
   year        = {2026},
-  version     = {0.5.0},
+  version     = {0.6.0},
   license     = {MIT},
   url         = {https://github.com/krivenkoss/imaging-studies},
   institution = {National Aerospace University, Department of Information and Communication Technologies}
