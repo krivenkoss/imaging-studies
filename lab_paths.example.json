@@ -5,6 +5,7 @@
   "cache_root": "../tmp/lab_cache",
   "images_root": "../Images",
   "data_root": "../data",
+  "private_root": "<folder outside the project>",
   "papers_root": "../papers",
   "metric_sources": "../other/sources/metrics",
   "octave_cli": "C:/Program Files/GNU Octave/Octave-<version>/mingw64/bin/octave-cli.exe",
