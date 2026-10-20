@@ -2,7 +2,8 @@
 
 The oracle does not call the module: shares are counted in the test by Python loops over pixels and
 over the 8 x 8 blocks with statistics.pstdev (another path than numpy std over reshaped blocks).
-Tiles: all 255, all 0, flat grey 128, noise sigma = 10, half frame / half noise. Also: tile count on
+Tiles: all 255, all 0, flat grey 128, noise sigma = 10, half frame / half noise, and a chessboard of
+4 x 4 squares (flat in 4 x 4 blocks, not in 8 x 8 - the block size is part of the measure). Also: tile count on
 sizes not divisible by 512, a copy whose png_sha256 differs from the registry is refused, the page claim
 is checked against its run-file entry and fails on swapped fields, the page carries the four parts of
 the explanation.
@@ -48,10 +49,16 @@ def noise_tile(seed=1):
     return np.clip(np.rint(128 + rng.normal(0, 10, (512, 512))), 0, 255).astype(np.uint8)
 
 
-@pytest.mark.parametrize("name", ["white", "black", "grey", "noise", "half"])
+def checker4_tile():
+    """4 x 4 squares of 100 and 104 in a chessboard: every 4 x 4 block flat, every 8 x 8 block std = 2."""
+    y, x = np.mgrid[0:512, 0:512]
+    return np.where((y // 4 + x // 4) % 2 == 0, 100, 104).astype(np.uint8)
+
+
+@pytest.mark.parametrize("name", ["white", "black", "grey", "noise", "half", "checker4"])
 def test_shares_against_the_loop_oracle(tiles, name):
     tile = {"white": np.full((512, 512), 255, np.uint8), "black": np.zeros((512, 512), np.uint8),
-            "grey": np.full((512, 512), 128, np.uint8), "noise": noise_tile()}.get(name)
+            "grey": np.full((512, 512), 128, np.uint8), "noise": noise_tile(), "checker4": checker4_tile()}.get(name)
     if name == "half":
         tile = noise_tile(2)
         tile[:256] = 255  # the upper half is frame
@@ -65,6 +72,8 @@ def test_shares_against_the_loop_oracle(tiles, name):
         assert got["share_flat"] == 0 and got["share_any"] < 0.01  # the other side: textured tile is not background
     if name == "half":
         assert 0.5 <= got["share_any"] < 0.51 and got["share_flat"] == pytest.approx(0.5)
+    if name == "checker4":  # the block size is part of the measure: 8 x 8 blocks of this tile are not flat
+        assert got["share_flat"] == 0 and got["share_any"] == 0
 
 
 def test_grid_on_sizes_not_divisible_by_512(tiles):
