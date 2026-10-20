@@ -32,13 +32,7 @@ def _coder(codec):
     return coders[codec]
 
 
-HEIF_MISMATCH = ("config.json coders.heif.codec does not name Pillow 12.3.0, and records x265 and libde265 by version "
-                 "number only, while heif.EXPECTED_VERSIONS holds the libheif_info() strings 'x265 HEVC encoder "
-                 "(4.3+1-e9b8812)' and 'libde265 HEVC decoder, version 1.1.3' (cycle 6 report; config.json not edited)")
-
-
-@pytest.mark.parametrize("codec", ["jpeg", pytest.param("heif", marks=pytest.mark.xfail(strict=True, reason=HEIF_MISMATCH)),
-                                   "avif"])
+@pytest.mark.parametrize("codec", ["jpeg", "heif", "avif"])
 def test_expected_versions_occur_in_config(codec):
     module, entry = importlib.import_module(f"imstudies.lab.coders.{codec}"), _coder(codec)
     missing = {name: version for name, version in module.EXPECTED_VERSIONS.items() if version not in entry["codec"]}

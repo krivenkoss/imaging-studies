@@ -4,7 +4,7 @@
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![tests](https://github.com/krivenkoss/imaging-studies/actions/workflows/P001.yml/badge.svg)
 
-Part of [imaging-studies](../../README.md) · Status: **planned** · Paper: in preparation, *Journal of Electrical Engineering*
+Part of [imaging-studies](../../README.md) · Status: **in progress (validation of metrics and codecs; data preparation)** · Paper: in preparation, *Journal of Electrical Engineering*
 
 ---
 
