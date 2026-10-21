@@ -256,3 +256,93 @@ def test_journal_resume_torn_line_and_another_header(book_module, tmp_path):
     assert j5.done["t4"][0]["status"] == "valid" and j5.to_retry == 0 and j5.last["t4"] == j5.done["t4"]
     with pytest.raises(book_module.JournalRefusal, match=r"differs in \['plan'\] \{'plan': \['vtm'\]\}"):
         book_module.Journal(path, header | {"plan": {"vtm": [1, 2, 3]}})
+
+
+def _text(title):
+    if title is None or title.tx is None or title.tx.rich is None:
+        return ""
+    return "".join(r.t for p in title.tx.rich.p for r in (p.r or []))
+
+
+def _parts(chart):
+    return getattr(chart, "_charts", None) or [chart]
+
+
+def test_series_styles_from_the_table(book_module, built):
+    """Every series carries the colour, line style and marker of the style table; in one chart the pairs
+    (colour, line style) differ."""
+    _, _, _, wb = built
+    codec_by_name = {v: k for k, v in book_module.CODEC_NAMES.items()}
+    metric_by_name = {name: key for key, name, _ in book_module.METRICS}
+    for sheet in ("Просмотр", "Обзор"):
+        for chart in wb[sheet]._charts:
+            title = _text(chart.title)
+            chart_codec = next((c for n, c in codec_by_name.items() if title.startswith(n)), None)
+            pairs = []
+            for part in _parts(chart):
+                for s in part.series:
+                    name, style = s.tx.v, book_module.series_style(s)
+                    if name in codec_by_name:
+                        want = book_module.CODEC_STYLE[codec_by_name[name]]
+                    elif name in metric_by_name:
+                        want = book_module.METRIC_STYLE[metric_by_name[name]]
+                    elif name.startswith("порог"):
+                        want = book_module.THRESHOLD_STYLE[int(name.split()[1])]
+                    elif name in book_module.QUARTILE_DASH:
+                        color, _, marker = book_module.CODEC_STYLE[chart_codec]
+                        want = (color, book_module.QUARTILE_DASH[name], marker)
+                    else:  # the CR series of a codec chart
+                        assert name == "CR" and chart_codec, (title, name)
+                        want = book_module.CODEC_STYLE[chart_codec]
+                    assert style == want, (sheet, title, name, style, want)
+                    pairs.append(style[:2])
+            assert len(pairs) == len(set(pairs)), (sheet, title)
+
+
+def test_codec_colours_far_apart_and_not_shades_of_one_tone(book_module):
+    import colorsys
+    import itertools
+    import math
+
+    rgb = {c: tuple(int(v[i:i + 2], 16) for i in (0, 2, 4)) for c, (v, _, _) in book_module.CODEC_STYLE.items()}
+    for a, b in itertools.combinations(rgb, 2):
+        assert math.dist(rgb[a], rgb[b]) >= 100, (a, b, math.dist(rgb[a], rgb[b]))
+        (ha, _, sa), (hb, _, sb) = (colorsys.rgb_to_hls(*(x / 255 for x in rgb[c])) for c in (a, b))
+        if sa > 0.2 and sb > 0.2:  # two chromatic colours: hues at least 30 degrees apart
+            gap = abs(ha - hb) * 360
+            assert min(gap, 360 - gap) >= 30, (a, b, gap)
+    assert len({d for _, d, _ in book_module.CODEC_STYLE.values()}) == 4
+    assert len({m for _, _, m in book_module.CODEC_STYLE.values()}) == 4
+
+
+def test_pcc_on_axes_legends_and_in_the_description(built):
+    _, _, _, wb = built
+    for sheet in ("Просмотр", "Обзор"):
+        for chart in wb[sheet]._charts:
+            texts = [_text(chart.title)] + [_text(p.x_axis.title) for p in _parts(chart)] + \
+                    [_text(p.y_axis.title) for p in _parts(chart)] + [s.tx.v for p in _parts(chart) for s in p.series]
+            joined = " ".join(texts)
+            assert "QP" not in joined and "качество" not in joined, (sheet, joined)
+            if "f(PCC)" in _text(chart.title):
+                assert _text(chart.x_axis.title) == "PCC", _text(chart.title)
+        heads = [wb[sheet].cell(7, c).value for c in range(1, wb[sheet].max_column + 1)]
+        assert "PCC" in heads and "QP" not in heads
+    description = {wb["Описание"].cell(r, 1).value: wb["Описание"].cell(r, 2).value
+                   for r in range(1, wb["Описание"].max_row + 1)}
+    assert description["PCC"] == "VVC (VTM) — QP; JPEG, HEIF, AVIF — quality"
+
+
+def test_two_series_alike_in_colour_and_line_are_refused(book_module, tmp_path):
+    from openpyxl import Workbook
+
+    ws = Workbook().active
+    for r in range(1, 4):
+        ws.cell(r, 1, r)
+        ws.cell(r, 2, r * 2)
+    chart = book_module._scatter("Проба", "PCC", "дБ")
+    chart.series.append(book_module._series(ws, 1, 2, 1, 3, "PSNR", ("0072B2", "solid", "circle")))
+    chart.series.append(book_module._series(ws, 1, 2, 1, 3, "PSNR-HVS-M", ("0072B2", "dash", "square")))
+    book_module.check_styles(chart)  # colour alike, line differs: allowed
+    chart.series.append(book_module._series(ws, 1, 2, 1, 3, "HaarPSI", ("0072B2", "solid", "triangle")))
+    with pytest.raises(book_module.StyleRefusal, match=r"chart 'Проба': series 'PSNR' and 'HaarPSI' coincide"):
+        book_module.check_styles(chart)

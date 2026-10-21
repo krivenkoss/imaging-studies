@@ -589,6 +589,8 @@ def main(argv=None):
         stream.reconfigure(errors="replace")
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--rebuild-book", action="store_true", help="rebuild the book from the existing run file")
+    parser.add_argument("--out", type=Path, help="with --rebuild-book: the book to write (default: beside the run file); "
+                                                 "an existing book is refused")
     args = parser.parse_args(argv)
     try:
         paths = load_paths()
@@ -596,8 +598,14 @@ def main(argv=None):
         if args.rebuild_book:
             if not (out_dir / RUN_FILE).is_file():
                 raise RunRefusal(f"no run file to rebuild the book from: {out_dir / RUN_FILE}")
-            build_book(out_dir / RUN_FILE, out_dir / BOOK_FILE)
-            print(f"Book rebuilt and checked cell by cell: {out_dir / BOOK_FILE}")
+            book = out_dir / BOOK_FILE
+            if args.out is not None:
+                book = args.out if args.out.is_absolute() else (Path.cwd() / args.out)
+                if book.exists():
+                    raise RunRefusal(f"{book} already exists: --out never overwrites a book")
+                book.parent.mkdir(parents=True, exist_ok=True)
+            build_book(out_dir / RUN_FILE, book)
+            print(f"Book rebuilt and checked cell by cell: {book}")
             return 0
         if (out_dir / RUN_FILE).exists():
             raise RunRefusal(f"{out_dir / RUN_FILE} already exists: a run file of cycle {CYCLE} is never overwritten")

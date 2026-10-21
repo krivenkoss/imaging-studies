@@ -21,15 +21,28 @@ import numpy as np
 
 CODECS = ("vtm", "jpeg", "heif", "avif")
 CODEC_NAMES = {"vtm": "VVC (VTM)", "jpeg": "JPEG", "heif": "HEIF", "avif": "AVIF"}
-PARAM_NAMES = {"vtm": "QP", "jpeg": "качество (quality)", "heif": "качество (quality)", "avif": "качество (quality)"}
+PARAM_NAMES = {codec: "PCC" for codec in CODECS}  # parameter controlled compression (STUDY.md section 5)
+PCC_LINE = ("PCC", "VVC (VTM) — QP; JPEG, HEIF, AVIF — quality")
+# The one style table (STUDY.md section 7, "Вид рядов"): colour (RGB hex), line style (DrawingML preset), marker.
+# AVIF #CC79A7 - owner decision 2026-10-21 (cycle 12): the declared #E69F00 was 67 from JPEG in RGB.
+CODEC_STYLE = {"vtm": ("0072B2", "solid", "circle"), "jpeg": ("D55E00", "dash", "square"),
+               "heif": ("000000", "sysDot", "triangle"), "avif": ("CC79A7", "dashDot", "diamond")}
+METRIC_STYLE = {"psnr_db": ("0072B2", "solid", "circle"), "psnr_hvs_m_db": ("D55E00", "dash", "square"),
+                "haarpsi": ("000000", "sysDot", "triangle")}
+QUARTILE_DASH = {"медиана": "solid", "q25": "dash", "q75": "sysDot"}  # colour and marker of the codec
+THRESHOLD_STYLE = {40: ("7F7F7F", "sysDot", "none"), 41: ("7F7F7F", "dash", "none"), 42: ("7F7F7F", "solid", "none")}
+
+
+class StyleRefusal(Exception):
+    """Two series of one chart coincide in colour and line style (owner decision 2026-10-21: colour AND line)."""
 LEVELS = {"f": "фрагменты", "m": "снимки"}
 METRICS = (("psnr_db", "PSNR", "PSNR, дБ"), ("psnr_hvs_m_db", "PSNR-HVS-M", "PSNR-HVS-M, дБ"),
            ("haarpsi", "HaarPSI", "HaarPSI, безразм."))
 QUANTITIES = (*((key, name) for key, name, _ in METRICS), ("cr_file", "CR"))  # overview columns
 STATS = (("median", "медиана"), ("q25", "q25"), ("q75", "q75"))
 THRESHOLDS_DB = (40, 41, 42)
-ROWS = (("Ключ «единица|кодек|параметр»", "key"), ("Единица", "unit"), ("Уровень", "level"), ("Кодек", "codec"),
-        ("Параметр", "param"), ("Статус", "status"), ("Файл, байт", "file_bytes"), ("CR, безразм.", "cr_file"),
+ROWS = (("Ключ «единица|кодек|PCC»", "key"), ("Единица", "unit"), ("Уровень", "level"), ("Кодек", "codec"),
+        ("PCC", "param"), ("Статус", "status"), ("Файл, байт", "file_bytes"), ("CR, безразм.", "cr_file"),
         ("bpp, бит/пикс.", "bpp"), ("PSNR, дБ", "psnr_db"), ("PSNR-HVS-M, дБ", "psnr_hvs_m_db"),
         ("HaarPSI, безразм.", "haarpsi"), ("Кодер, с", "seconds"), ("Метрики, с", "seconds_metrics"),
         ("sha256 файла", "file_sha256"), ("Причина сбоя", "detail"))
@@ -137,8 +150,8 @@ def overview(rows):
     return out
 
 
-OVERVIEW_COLUMNS = (("Ключ «уровень|кодек|параметр»", "key"), ("Уровень", "level"), ("Кодек", "codec"),
-                    ("Параметр", "param"), ("n единиц, шт", "n"), ("Без потерь, шт", "n_lossless"),
+OVERVIEW_COLUMNS = (("Ключ «уровень|кодек|PCC»", "key"), ("Уровень", "level"), ("Кодек", "codec"),
+                    ("PCC", "param"), ("n единиц, шт", "n"), ("Без потерь, шт", "n_lossless"),
                     *((f"{name} {label}", f"{name}|{label}") for _, name in QUANTITIES for _, label in STATS))
 
 
@@ -208,7 +221,7 @@ def book_cells(record, run_sha256, describe):
     rows = record["rows"]
     lines = [("Команда", record["command"]), ("Вопрос", record["question"]),
              ("Файл прогона", f"{record['run']} (cycles/{record['cycle']}/ под cache_root из lab_paths.json)"),
-             ("sha256 файла прогона", run_sha256), *describe(record)]
+             ("sha256 файла прогона", run_sha256), PCC_LINE, *describe(record)]
     for i, (k, v) in enumerate(lines, start=1):
         cells["Описание", i, 1], cells["Описание", i, 2] = k, v
     for i, (k, v) in enumerate(record["summary_lines"], start=1):
@@ -286,15 +299,45 @@ def _scatter(title, x_title, y_title, log_x=False, log_y=False):
     return chart
 
 
-def _series(ws, x_col, y_col, first, last, title):
+def _series(ws, x_col, y_col, first, last, title, style):
+    """A scatter series with its explicit colour, line style and marker from the style table."""
     from openpyxl.chart import Reference, Series
     from openpyxl.chart.marker import Marker
+    from openpyxl.chart.shapes import GraphicalProperties
+    from openpyxl.drawing.line import LineProperties
 
+    color, dash, marker = style
     s = Series(Reference(ws, min_col=y_col, min_row=first, max_row=last),
                Reference(ws, min_col=x_col, min_row=first, max_row=last), title=title)
-    s.marker = Marker(symbol="circle", size=3)
+    s.graphicalProperties = GraphicalProperties(ln=LineProperties(solidFill=color, prstDash=dash, w=19050))
+    s.marker = Marker(symbol=marker, size=5)
+    if marker != "none":
+        s.marker.graphicalProperties = GraphicalProperties(solidFill=color, ln=LineProperties(solidFill=color))
     s.smooth = False
     return s
+
+
+def series_style(series):
+    """(colour, line style, marker) written on a series."""
+    ln = series.graphicalProperties.line
+    color = getattr(ln.solidFill, "srgbClr", ln.solidFill)
+    color = getattr(color, "val", color)  # a string when built, an RGB object when read back
+    return color, ln.prstDash, series.marker.symbol or "none"  # the reader turns symbol "none" into None
+
+
+def check_styles(chart):
+    """Refuse a chart where two series coincide in colour and line style; returns the chart."""
+    seen = {}
+    for part in getattr(chart, "_charts", None) or [chart]:  # _charts of a combined chart holds the chart itself
+        for s in part.series:
+            color, dash, _ = series_style(s)
+            title = s.tx.strRef.f if s.tx and s.tx.strRef else (s.tx.v if s.tx else "?")
+            if (color, dash) in seen:
+                name = chart.title.tx.rich.p[0].r[0].t if chart.title else "?"
+                raise StyleRefusal(f"chart '{name}': series '{seen[color, dash]}' and '{title}' coincide in colour "
+                                   f"#{color} and line style {dash}")
+            seen[color, dash] = title
+    return chart
 
 
 def add_view_charts(ws, rows):
@@ -305,34 +348,35 @@ def add_view_charts(ws, rows):
     for codec, (c0, params) in layout.items():  # metric = f(parameter): PSNR, PSNR-HVS-M left, HaarPSI right
         first, last = TABLE_ROW, TABLE_ROW + len(params) - 1
         chart = _scatter(f"{CODEC_NAMES[codec]}: метрики = f({PARAM_NAMES[codec]})", PARAM_NAMES[codec], "PSNR, PSNR-HVS-M, дБ")
-        chart.series.append(_series(ws, c0, c0 + 1, first, last, "PSNR"))
-        chart.series.append(_series(ws, c0, c0 + 2, first, last, "PSNR-HVS-M"))
+        chart.series.append(_series(ws, c0, c0 + 1, first, last, "PSNR", METRIC_STYLE["psnr_db"]))
+        chart.series.append(_series(ws, c0, c0 + 2, first, last, "PSNR-HVS-M", METRIC_STYLE["psnr_hvs_m_db"]))
         right = _scatter("", PARAM_NAMES[codec], "HaarPSI, безразм.")
-        right.series.append(_series(ws, c0, c0 + 3, first, last, "HaarPSI"))
+        right.series.append(_series(ws, c0, c0 + 3, first, last, "HaarPSI", METRIC_STYLE["haarpsi"]))
         right.y_axis.axId, right.y_axis.crosses = 200, "max"
         chart += right
         charts.append(chart)
     for m, (key, name, unit_title) in enumerate(METRICS):  # metric = f(CR), four codecs
         chart = _scatter(f"{name} = f(CR), четыре кодека", "CR, безразм. (лог. шкала)", unit_title, log_x=True)
         for codec, (c0, params) in layout.items():
-            chart.series.append(_series(ws, c0 + 4, c0 + 1 + m, TABLE_ROW, TABLE_ROW + len(params) - 1, CODEC_NAMES[codec]))
+            chart.series.append(_series(ws, c0 + 4, c0 + 1 + m, TABLE_ROW, TABLE_ROW + len(params) - 1, CODEC_NAMES[codec],
+                                        CODEC_STYLE[codec]))
         if key == "psnr_hvs_m_db":
             for k, t in enumerate(THRESHOLDS_DB):
-                chart.series.append(_series(ws, 2, 3 + k, 4, 5, f"порог {t} дБ"))
+                chart.series.append(_series(ws, 2, 3 + k, 4, 5, f"порог {t} дБ", THRESHOLD_STYLE[t]))
         charts.append(chart)
     for codec, (c0, params) in layout.items():  # CR = f(parameter)
         chart = _scatter(f"{CODEC_NAMES[codec]}: CR = f({PARAM_NAMES[codec]})", PARAM_NAMES[codec],
                          "CR, безразм. (лог. шкала)", log_y=True)
-        chart.series.append(_series(ws, c0, c0 + 4, TABLE_ROW, TABLE_ROW + len(params) - 1, "CR"))
+        chart.series.append(_series(ws, c0, c0 + 4, TABLE_ROW, TABLE_ROW + len(params) - 1, "CR", CODEC_STYLE[codec]))
         charts.append(chart)
     for x_m, y_m in ((0, 1), (1, 2)):  # metric against metric
         chart = _scatter(f"{METRICS[y_m][1]} против {METRICS[x_m][1]}", METRICS[x_m][2], METRICS[y_m][2])
         for codec, (c0, params) in layout.items():
             chart.series.append(_series(ws, c0 + 1 + x_m, c0 + 1 + y_m, TABLE_ROW, TABLE_ROW + len(params) - 1,
-                                        CODEC_NAMES[codec]))
+                                        CODEC_NAMES[codec], CODEC_STYLE[codec]))
         charts.append(chart)
     for k, chart in enumerate(charts):
-        ws.add_chart(chart, f"{_col(anchor_col + (k % 2) * 11)}{2 + (k // 2) * 18}")
+        ws.add_chart(check_styles(chart), f"{_col(anchor_col + (k % 2) * 11)}{2 + (k // 2) * 18}")
     return charts
 
 
@@ -345,23 +389,26 @@ def add_overview_charts(ws, rows):
         first, last = TABLE_ROW, TABLE_ROW + len(params) - 1
         chart = _scatter(f"{CODEC_NAMES[codec]}: выбранная метрика = f({PARAM_NAMES[codec]}), медиана и квартили",
                          PARAM_NAMES[codec], "выбранная метрика (дБ или безразм.)")
+        color, _, marker = CODEC_STYLE[codec]
         for j, title in ((1, "медиана"), (2, "q25"), (3, "q75")):
-            chart.series.append(_series(ws, c0, c0 + j, first, last, title))
+            chart.series.append(_series(ws, c0, c0 + j, first, last, title, (color, QUARTILE_DASH[title], marker)))
         charts.append(chart)
     chart = _scatter("Медиана метрики против медианы CR, четыре кодека", "медиана CR, безразм. (лог. шкала)",
                      "медиана выбранной метрики", log_x=True)
     for codec, (c0, params) in layout.items():
-        chart.series.append(_series(ws, c0 + 5, c0 + 1, TABLE_ROW, TABLE_ROW + len(params) - 1, CODEC_NAMES[codec]))
+        chart.series.append(_series(ws, c0 + 5, c0 + 1, TABLE_ROW, TABLE_ROW + len(params) - 1, CODEC_NAMES[codec],
+                                    CODEC_STYLE[codec]))
     charts.append(chart)
     for codec, (c0, params) in layout.items():  # CR = f(parameter): median and quartiles
         first, last = TABLE_ROW, TABLE_ROW + len(params) - 1
         chart = _scatter(f"{CODEC_NAMES[codec]}: CR = f({PARAM_NAMES[codec]}), медиана и квартили", PARAM_NAMES[codec],
                          "CR, безразм. (лог. шкала)", log_y=True)
+        color, _, marker = CODEC_STYLE[codec]
         for j, title in ((5, "медиана"), (6, "q25"), (7, "q75")):
-            chart.series.append(_series(ws, c0, c0 + j, first, last, title))
+            chart.series.append(_series(ws, c0, c0 + j, first, last, title, (color, QUARTILE_DASH[title], marker)))
         charts.append(chart)
     for k, chart in enumerate(charts):
-        ws.add_chart(chart, f"{_col(anchor_col + (k % 2) * 11)}{2 + (k // 2) * 18}")
+        ws.add_chart(check_styles(chart), f"{_col(anchor_col + (k % 2) * 11)}{2 + (k // 2) * 18}")
     return charts
 
 
