@@ -70,8 +70,7 @@ class Journal:
         self.path, self.header, self.lock = Path(path), header, threading.Lock()
         self.done, self.last, self.entries, self.torn_lines = {}, {}, [], 0
         if self.path.is_file():
-            lines = self.path.read_text(encoding="utf-8").split("\n")
-            old = json.loads(lines[0])
+            old, entries, torn = read_journal(self.path)
             if _canonical(old) != _canonical(header):
                 differ = sorted(k for k in set(old) | set(header) if _canonical(old.get(k)) != _canonical(header.get(k)))
                 inner = {k: sorted(s for s in set(old.get(k) or {}) | set(header.get(k) or {})
@@ -79,17 +78,11 @@ class Journal:
                          for k in differ if isinstance(old.get(k), dict) and isinstance(header.get(k), dict)}
                 raise JournalRefusal(f"the journal {self.path.name} was started with another header: differs in "
                                      f"{differ} {inner} - finish or remove it by hand, or restore the same setup")
-            for line in lines[1:]:
-                if not line.strip():
-                    continue
-                try:
-                    entry = json.loads(line)
-                except json.JSONDecodeError:
-                    self.torn_lines += 1
-                    continue
+            self.entries, self.torn_lines = entries, torn
+            for entry in entries:
                 self.last[entry["task"]] = entry["rows"]
-                self.entries.append(entry)
             if self.torn_lines:  # rewrite without the torn line, so the next appends start on a fresh line
+                lines = self.path.read_text(encoding="utf-8").split("\n")
                 good = [lines[0]] + [ln for ln in lines[1:] if ln.strip() and _loads_ok(ln)]
                 self.path.write_text("\n".join(good) + "\n", encoding="utf-8")
         else:
@@ -113,6 +106,21 @@ class Journal:
             else:
                 self.done[task] = rows
             self.entries.append({"task": task, "rows": rows, **extra})
+
+
+def read_journal(path):
+    """Header, entries and the number of torn lines of a journal, read only: also a look from outside (--status)
+    while a session may be writing its last line."""
+    lines = Path(path).read_text(encoding="utf-8").split("\n")
+    entries, torn = [], 0
+    for line in lines[1:]:
+        if not line.strip():
+            continue
+        try:
+            entries.append(json.loads(line))
+        except json.JSONDecodeError:
+            torn += 1
+    return json.loads(lines[0]), entries, torn
 
 
 def failed(rows):

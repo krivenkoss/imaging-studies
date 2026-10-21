@@ -1,4 +1,4 @@
-"""E4 of P001: at which PCC do VVC, JPEG, HEIF and AVIF reach the PSNR-HVS-M threshold on 154 fragments and 16 whole radiographs, and with what CR - the main run? Run: python studies/P001_vvc-dental/run_e4.py   (--plan: the plan from metadata, no pixels)
+"""E4 of P001: at which PCC do VVC, JPEG, HEIF and AVIF reach the PSNR-HVS-M threshold on 154 fragments and 16 whole radiographs, and with what CR - the main run? Run: python studies/P001_vvc-dental/run_e4.py --hours 10   (one session; the same command continues; --status: progress from the journal; --plan: the plan from metadata, no pixels)
 
 Study P001, contract E4 of STUDY.md section 7, search of section 5. Units: the 16 whole images of the copy
 data/P001 (B10) and the 154 fragments of the centred grid (B11 0.2.0, cycles/9/p001_tiles.json). Whole images:
@@ -6,22 +6,27 @@ VTM grid QP -12, -8, ..., 60 and, after the grid of an image, 3 QP between the n
 PSNR-HVS-M = 42 dB from the high-quality side (no crossing - no_crossing with the reason); fragments: VTM QP
 -12..63; JPEG, HEIF, AVIF - every value on both levels. A pool of 4 coder processes, slow tasks first by the
 times of cycle 11, whole images before fragments; rows go to the journal e4_main.partial.jsonl as tasks finish;
-the same command continues it (a failed task runs again; another header is refused); peak memory; determinism
-control. Writes <cache_root>/cycles/<CYCLE>/e4_main.json once and the book e4_main.xlsx (e4_book.py). Only codes
-- no file names, no pixels - leave the run. `--plan` reads the registry and the grid only.
+the same command continues it (another commit or header is refused). A failed task runs again once in the same
+session, right after the failure, and then at the next session. Sessions (LAB-EXPERIMENT, chain, 3): `--hours H`
+or the empty file STOP beside the journal stop a session by plan - no new task is given, the started ones are
+finished into the journal, the journal is copied to e4_main.partial.session-<k>.jsonl, exit code 0; Ctrl+C or a
+killed process loses only the started tasks. The output of a session is copied to e4_main.session-<k>.log, with a
+progress line every 10 min. The session that leaves no task unfinished writes <cache_root>/cycles/<CYCLE>/e4_main.json
+once and the book e4_main.xlsx (e4_book.py). Only codes - no file names, no pixels - leave the run. `--status` and
+`--plan` read the journal, the registry and the grid only.
 """
 
 import argparse
+import collections
 import concurrent.futures
 import datetime
-import hashlib
 import importlib.util
 import json
+import os
 import platform
 import shutil
 import statistics
 import sys
-import threading
 import time
 from pathlib import Path
 
@@ -41,8 +46,15 @@ _spec.loader.exec_module(e4_book)
 COMMAND = "python studies/P001_vvc-dental/run_e4.py"
 QUESTION = ("E4, P001: при каком PCC кодеки VVC, JPEG, HEIF и AVIF дают на 154 фрагментах и 16 целых снимках "
             "PSNR-HVS-M порога и какой при этом CR — основной прогон?")
-CYCLE = 13  # the cycle that runs E4; the task of that cycle confirms or changes it
+CYCLE = 13  # the cycle that runs E4 (confirmed by the task of cycle 13)
 RUN_FILE, BOOK_FILE, JOURNAL_FILE, WORK_DIR = "e4_main.json", "e4_main.xlsx", "e4_main.partial.jsonl", "e4_main_work"
+STOP_FLAG = "STOP"  # an empty file beside the journal: the session stops by plan
+SESSION_LOG, SESSION_COPY = "e4_main.session-{k}.log", "e4_main.partial.session-{k}.jsonl"
+STOPPED = "сессия остановлена по плану — та же команда продолжит"
+POLL_S = 5.0  # the deadline and the flag are looked at between tasks and at least this often
+PROGRESS_S = 600  # a progress line every 10 min
+FRESH_S = 900  # --status: a session runs while its journal changed within 15 min (a progress line goes there every 10)
+INCOMPLETE = "grid incomplete: a node is missing or failed - waits for the next session"
 REGISTRY_SHA256 = "03affc6c150cb3f5beaf2a6c99c1f55861aa877666d77a9e20cc382e30d8f949"  # data/registry/P001.json, cycle 8
 TILES_SHA256 = "aad8e80ccb5b972ef3ce7d9f22225f34c15e56ce08dc0247efbdf0af8fcc10a1"  # cycles/9/p001_tiles.json
 CYCLE11_SHA256 = "a0365d9766cae3813d56b7a0c2f822cb9fce4c8bb11a4e11a37c0d3bf16979d9"  # cycles/11/e4_dry.json
@@ -60,7 +72,7 @@ DECLARED = {
     "search": ("PCC (STUDY.md §5): фрагменты — VTM QP −12…63; снимки — сетка QP −12, −8, …, 60 и после сетки снимка 3 QP "
                "a + 1…a + 3 между узлами a и a + 4 первого пересечения PSNR-HVS-M = 42 дБ со стороны высокого качества "
                "(§6; без потерь — выше порога); нет пересечения — уточнения нет, no_crossing с причиной; сетка с "
-               "незаконченной или со сбойной задачей — уточнение ждёт следующего запуска. JPEG 1…100, HEIF 0…100, AVIF "
+               "незаконченной или со сбойной задачей — уточнение ждёт следующей сессии. JPEG 1…100, HEIF 0…100, AVIF "
                "0…100 (B12, пакет) — оба уровня полностью."),
     "per_file": ("Размер, CR по файлу, bpp, PSNR, PSNR-HVS-M, HaarPSI, секунды; sha256 файла и восстановления; статусы "
                  "valid, lossless, error."),
@@ -70,8 +82,16 @@ DECLARED = {
               "интерполяция по QP, вне — ближайшая; плюс медиана секунд метрик уровня), при равенстве — по кодеку, PCC, "
               "единице. JPEG и HEIF единицы — одна задача на все значения."),
     "resume": ("Журнал e4_main.partial.jsonl: шапка — объявленное, план, коммит, версии кодеков, sha256 реестра и сетки; "
-               "строка на законченную задачу; та же команда продолжает; иная шапка — отказ словами; задача со всеми "
-               "строками error выполняется снова, в файл прогона идёт её последняя запись."),
+               "строка на законченную задачу; та же команда продолжает; иной коммит или иная шапка — отказ словами; "
+               "задача со всеми строками error выполняется снова — в той же сессии один раз, сразу после сбоя, затем "
+               "при следующей сессии; в файл прогона идёт её последняя запись. Файл прогона и книгу пишет сессия, после "
+               "которой не осталось ни незаконченной задачи, ни снимка без законченной сетки."),
+    "sessions": ("Сессии по ≈ 10 ч (LAB-EXPERIMENT, цепочка, п. 3): --hours H — через H ч от начала сессии новые задачи "
+                 "не выдаются; файл-флаг STOP рядом с журналом — то же в любой момент (проверяется между задачами и не "
+                 "реже раза в 5 с, затем переименовывается в STOP.done-<k>); начатые задачи доводятся до журнала, "
+                 "журнал копируется в e4_main.partial.session-<k>.jsonl, выход с кодом 0. Ctrl+C и снятие процесса "
+                 "теряют только начатые задачи. Вывод сессии — и в e4_main.session-<k>.log; строка прогресса — каждые "
+                 "10 мин и в конце сессии; --status — та же строка по журналу, без запуска задач."),
     "control": "Детерминизм: первый фрагмент QP 22 и 37 и первый снимок QP 40 повторяются последовательно — sha256 = пулу.",
     "memory": "Опрос каждые 0,5 с (psutil): сумма RSS прогона и дочерних, RSS одного EncoderApp — по этапам, ГиБ.",
     "book": "Книга по STUDY.md §7 («Книга E4», «Вид рядов»): PCC, таблица стиля, «Просмотр», «Обзор»; страниц нет (E6).",
@@ -80,6 +100,10 @@ DECLARED = {
 
 class RunStopped(Exception):
     """The run was stopped (Ctrl+C or the test stop); the journal holds every finished task."""
+
+
+def utc_now():
+    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
 
 
 def load_paths():
@@ -129,6 +153,12 @@ def load_inputs(data_root, tiles_path, pins=(REGISTRY_SHA256, TILES_SHA256)):
     return registry, rows, tile
 
 
+def unit_levels(registry, tile_rows):
+    """Units and their levels from metadata, in the order of load_units: whole images by code, then fragments."""
+    levels = {e["code"]: "m" for e in sorted(registry["images"], key=lambda e: e["code"])}
+    return levels | {r["tile"]: "f" for r in sorted(tile_rows, key=lambda r: r["tile"])}
+
+
 def load_units(data_root, registry, tile_rows, tile):
     """Pixels of the copy (E4 run only): whole images first, then the fragments as views."""
     _, images = p001_tiles.load_copy(data_root)
@@ -176,15 +206,150 @@ def task_id(unit, codec, param):
     return f"{unit}|{codec}|{param}"
 
 
+def entry_kind(task):
+    """What a journal entry is: a task of the plan, a control task, or a note of the run (pool, session, progress)."""
+    head = task.split("|", 1)[0]
+    return head if head in ("pool", "session", "progress", "control") else "task"
+
+
 def order_key(task):
     """Whole images before fragments; slow first; then codec, PCC, unit."""
     return (task["level"] != "m", -task["expected"], e4_book.CODECS.index(task["codec"]), str(task["param"]), task["unit"])
 
 
+def make_task(level, unit, codec, param, phase, plan, timing):
+    params = [param] if codec == "vtm" else plan[codec]
+    return {"id": task_id(unit, codec, param), "unit": unit, "level": level, "codec": codec, "param": param,
+            "kind": phase, "expected": expected_seconds(timing, level, codec, params)}
+
+
+def stage_tasks(levels, level, plan, timing):
+    """Tasks of whole images (level m: the VTM grid, JPEG, HEIF, AVIF) or of fragments (f: VTM, JPEG, HEIF, AVIF);
+    JPEG, HEIF and AVIF of a unit are one task over all their values."""
+    qps, phase = (plan["vtm"]["m_grid"], "grid") if level == "m" else (plan["vtm"]["f"], "fragment")
+    tasks = []
+    for unit, lv in levels.items():
+        if lv == level:
+            tasks += [make_task(level, unit, "vtm", qp, phase, plan, timing) for qp in qps]
+            tasks += [make_task(level, unit, c, "batch", "still", plan, timing) for c in ("jpeg", "heif", "avif")]
+    return tasks
+
+
+def refinements(levels, plan, last):
+    """Per whole image: refinement QPs after a complete grid, or the reason why there are none (yet)."""
+    out, v = {}, plan["vtm"]
+    for unit, level in levels.items():
+        if level != "m":
+            continue
+        grid = [last.get(task_id(unit, "vtm", qp)) for qp in v["m_grid"]]
+        if any(g is None or g[0]["status"] == "error" for g in grid):
+            out[unit] = {"qps": [], "reason": INCOMPLETE}
+            continue
+        qps, reason = e4_book.refinement([(g[0]["param"], g[0]["psnr_hvs_m_db"]) for g in grid], v["threshold_db"],
+                                         v["refine_step"])
+        out[unit] = {"qps": qps, "reason": reason}
+    return out
+
+
+def refine_tasks(refine, plan, timing):
+    return [make_task("m", unit, "vtm", qp, "refine", plan, timing) for unit, ref in refine.items() for qp in ref["qps"]]
+
+
+def control_ids(levels, plan):
+    """Determinism control: the first fragment at two QPs and the first whole image at one, one after another."""
+    c = plan["controls"]
+    fragment = min((u for u, lv in levels.items() if lv == "f"), default=None)
+    whole = min((u for u, lv in levels.items() if lv == "m"), default=None)
+    pairs = ([(fragment, q) for q in c["fragment_qps"]] if fragment else []) + ([(whole, c["whole_qp"])] if whole else [])
+    return [(f"control|{unit}|vtm|{qp}", unit, qp) for unit, qp in pairs]
+
+
+def planned(levels, plan, timing, last):
+    """Every task of the run as far as it is known now; an image whose grid is not finished counts the
+    refine_step - 1 QPs of the dry run (cycle 11) as its refinement."""
+    refine = refinements(levels, plan, last)
+    guess = timing["refine_qps"][:plan["vtm"]["refine_step"] - 1]
+    known = {u: {"qps": guess if r["reason"] == INCOMPLETE else r["qps"]} for u, r in refine.items()}
+    tasks = stage_tasks(levels, "m", plan, timing) + refine_tasks(known, plan, timing) + stage_tasks(levels, "f", plan, timing)
+    return tasks, refine
+
+
+def unfinished(levels, plan, timing, last):
+    """What keeps the run from its run file: tasks of the plan and controls not finished (never run or failed) and
+    images whose grid is not finished."""
+    done = {t for t, rows in last.items() if not e4_book.failed(rows)}
+    tasks, refine = planned(levels, plan, timing, last)
+    ids = [t["id"] for t in tasks] + [c[0] for c in control_ids(levels, plan)]
+    return [i for i in ids if i not in done], sorted(u for u, r in refine.items() if r["reason"] == INCOMPLETE)
+
+
+def progress_line(levels, plan, timing, last, session, wall_s, peak_bytes):
+    """One line: finished / all tasks by level and codec, controls, error rows and failed tasks, the wall of the
+    session, the expected rest (times and k of cycle 11) and the peak memory."""
+    done = {t for t, rows in last.items() if not e4_book.failed(rows)}
+    tasks, _ = planned(levels, plan, timing, last)
+    count = {}
+    for t in tasks:
+        c = count.setdefault((t["level"], t["codec"]), [0, 0])
+        c[0] += t["id"] in done
+        c[1] += 1
+    parts = [f"{name} " + ", ".join(f"{e4_book.CODEC_NAMES[c]} {count[(level, c)][0]}/{count[(level, c)][1]}"
+                                    for c in e4_book.CODECS if (level, c) in count)
+             for level, name in (("m", "whole images"), ("f", "fragments"))]
+    controls = control_ids(levels, plan)
+    rest_s = sum(t["expected"] for t in tasks if t["id"] not in done)
+    errors = sum(r["status"] == "error" for t, rows in last.items() if entry_kind(t) == "task" for r in rows)
+    to_retry = sum(e4_book.failed(rows) for t, rows in last.items() if entry_kind(t) in ("task", "control"))
+    when = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    return (f"progress {when} | session {session}, wall {wall_s / 3600:.2f} h | done "
+            f"{sum(c[0] for c in count.values())}/{len(tasks)} tasks: {'; '.join(parts)}; controls "
+            f"{sum(c[0] in done for c in controls)}/{len(controls)} | error: {errors} rows, {to_retry} tasks to run "
+            f"again | expected rest {rest_s / timing['k'] / 3600:.2f} h (cycle 11 times, k = {timing['k']:.2f}) | "
+            f"peak memory {peak_bytes / 2 ** 30:.2f} GiB")
+
+
+def sessions(entries):
+    """Per session from the journal: start, end (stopped by plan and why, ended with tasks left, finished the run,
+    or cut off - no end written), wall, tasks taken from the journal at its start, tasks it recorded, started tasks
+    finished after the stop signal."""
+    out, ids = [], []
+    for e in entries:
+        kind = entry_kind(e["task"])
+        if kind == "session" and e["task"].endswith("|start"):
+            out.append({"session": e["session"], "started_utc": e["utc"], "hours": e["hours"],
+                        "taken_from_journal": e["taken_from_journal"], "end": "cut off", "wall_s": None,
+                        "last_progress_wall_s": None, "recorded_tasks": 0, "finished_after_signal": None})
+            ids.append(set())
+        elif not out:
+            continue
+        elif kind == "session":
+            out[-1] |= {"end": e["end"], "wall_s": e["wall_s"], "finished_after_signal": e["finished_after_signal"]}
+        elif kind == "progress":
+            out[-1]["last_progress_wall_s"] = e["wall_s"]
+        elif kind in ("task", "control"):
+            ids[-1].add(e["task"])
+            out[-1]["recorded_tasks"] = len(ids[-1])
+    return out
+
+
+def tee(log, path):
+    """The output of a session goes to `log` and to its own file, line by line."""
+    def out(text):
+        log(text)
+        with open(path, "a", encoding="utf-8", newline="\n") as f:
+            f.write(f"{text}\n")
+    return out
+
+
 class Runner:
-    def __init__(self, paths, units, plan, journal, work, timing, stop_after=None, log=print):
+    def __init__(self, paths, units, plan, journal, work, timing, session, t0, stop_after=None, log=print,
+                 deadline_s=None, flag=None, clock=time.monotonic, poll_s=POLL_S, progress_s=PROGRESS_S):
         self.paths, self.units, self.plan, self.journal, self.work = paths, units, plan, journal, work
-        self.timing, self.stop_after, self.log, self.new = timing, stop_after, log, 0
+        self.timing, self.session, self.t0, self.stop_after, self.log = timing, session, t0, stop_after, log
+        self.deadline_s, self.flag, self.clock, self.poll_s, self.progress_s = deadline_s, flag, clock, poll_s, progress_s
+        self.levels = {u: i["level"] for u, i in units.items()}
+        self.new, self.stopping, self.after_signal, self.retried = 0, None, 0, set()
+        self.peak, self.probe, self.last_progress = 0, None, t0
 
     def record(self, task, rows, **extra):
         self.journal.append(task, rows, **extra)
@@ -192,48 +357,27 @@ class Runner:
         if self.stop_after is not None and self.new >= self.stop_after:
             raise RunStopped(f"stopped after {self.new} new tasks (test stop)")
 
-    def vtm(self, unit, qp, kind):
-        level = self.units[unit]["level"]
-        return {"id": task_id(unit, "vtm", qp), "unit": unit, "level": level, "codec": "vtm", "param": qp, "kind": kind,
-                "expected": expected_seconds(self.timing, level, "vtm", [qp])}
+    def check_stop(self, running):
+        """A stop by plan: the hours of the session are over or the flag file lies beside the journal. Once noticed,
+        no task is given any more; the `running` started ones are finished into the journal."""
+        if self.stopping is None:
+            if self.deadline_s is not None and self.clock() - self.t0 >= self.deadline_s:
+                self.stopping = "deadline"
+            elif self.flag is not None and self.flag.exists():
+                self.stopping = "flag"
+            if self.stopping:
+                self.log(f"  planned stop ({self.stopping}): no new task is given; {running} started tasks are "
+                         "finished into the journal")
+        return self.stopping
 
-    def still(self, unit, codec):
-        level = self.units[unit]["level"]
-        param = "batch"
-        return {"id": task_id(unit, codec, param), "unit": unit, "level": level, "codec": codec, "param": param,
-                "kind": "still", "expected": expected_seconds(self.timing, level, codec, self.plan[codec])}
-
-    def whole_tasks(self):
-        tasks = []
-        for unit, info in self.units.items():
-            if info["level"] == "m":
-                tasks += [self.vtm(unit, qp, "grid") for qp in self.plan["vtm"]["m_grid"]]
-                tasks += [self.still(unit, codec) for codec in ("jpeg", "heif", "avif")]
-        return tasks
-
-    def fragment_tasks(self):
-        tasks = []
-        for unit, info in self.units.items():
-            if info["level"] == "f":
-                tasks += [self.vtm(unit, qp, "fragment") for qp in self.plan["vtm"]["f"]]
-                tasks += [self.still(unit, codec) for codec in ("jpeg", "heif", "avif")]
-        return tasks
-
-    def refinements(self):
-        """Per whole image: refinement QPs after a complete grid, or the reason why there are none (yet)."""
-        out = {}
-        v = self.plan["vtm"]
-        for unit, info in self.units.items():
-            if info["level"] != "m":
-                continue
-            grid = [self.journal.last.get(task_id(unit, "vtm", qp)) for qp in v["m_grid"]]
-            if any(g is None or g[0]["status"] == "error" for g in grid):
-                out[unit] = {"qps": [], "reason": "grid incomplete: a node is missing or failed - waits for the next run"}
-                continue
-            qps, reason = e4_book.refinement([(g[0]["param"], g[0]["psnr_hvs_m_db"]) for g in grid], v["threshold_db"],
-                                             v["refine_step"])
-            out[unit] = {"qps": qps, "reason": reason}
-        return out
+    def progress(self, force=False):
+        now = self.clock()
+        if not force and now - self.last_progress < self.progress_s:
+            return
+        self.last_progress = now
+        peak = max(self.peak, self.probe.peak_total if self.probe else 0)
+        self.log(progress_line(self.levels, self.plan, self.timing, self.journal.last, self.session, now - self.t0, peak))
+        self.journal.append(f"progress|{self.session}|{utc_now()}", [], wall_s=now - self.t0, peak_total_bytes=peak)
 
     def execute(self, task):
         info = self.units[task["unit"]]
@@ -243,47 +387,57 @@ class Runner:
                     | {"phase": task["kind"]}]
         return still_task(self.paths, task["unit"], task["level"], image, task["codec"], self.plan[task["codec"]], self.work)
 
+    def work_on(self, task, session):
+        return [r | {"session": session, "order": task["position"]} for r in self.execute(task)]
+
     def pool(self, name, tasks):
+        """Unfinished tasks, slow first, at most `pool` at a time. A failed task runs again once in this session, right
+        after the failure. After a stop signal no task is given and the started ones are finished into the journal."""
         todo = sorted((t for t in tasks if t["id"] not in self.journal.done), key=order_key)
-        if not todo:
+        if not todo or self.check_stop(0):
             return
-        session = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+        for position, task in enumerate(todo):
+            task["position"] = position
+        session = utc_now()
         self.log(f"  {name}: {len(todo)} tasks, {self.plan['pool']} processes, whole images first, slow first")
-        stop = threading.Event()
-
-        def work(position, task):
-            if stop.is_set():
-                return None
-            rows = self.execute(task)
-            return [r | {"session": session, "order": position} for r in rows]
-
-        t0 = time.perf_counter()
-        done_ids = []
+        queue, running, done_ids, t0 = collections.deque(todo), {}, [], time.perf_counter()
         with e4_book.MemoryProbe() as probe:
+            self.probe = probe
             executor = concurrent.futures.ThreadPoolExecutor(max_workers=self.plan["pool"])
-            futures = {executor.submit(work, k, t): t for k, t in enumerate(todo)}
             try:
-                for future in concurrent.futures.as_completed(futures):
-                    rows = future.result()
-                    if rows is None or stop.is_set():
-                        continue
-                    done_ids.append(futures[future]["id"])
-                    self.record(futures[future]["id"], rows)
+                while True:
+                    while queue and len(running) < self.plan["pool"] and not self.check_stop(len(running)):
+                        task = queue.popleft()
+                        running[executor.submit(self.work_on, task, session)] = task
+                    if not running:
+                        break
+                    finished, _ = concurrent.futures.wait(running, timeout=self.poll_s,
+                                                          return_when=concurrent.futures.FIRST_COMPLETED)
+                    for future in finished:
+                        task = running.pop(future)
+                        rows = future.result()
+                        self.after_signal += self.stopping is not None
+                        done_ids.append(task["id"])
+                        self.record(task["id"], rows)
+                        if e4_book.failed(rows) and task["id"] not in self.retried and not self.stopping:
+                            self.retried.add(task["id"])
+                            queue.appendleft(task)
+                            self.log(f"  {task['id']}: failed - runs again once, now")
+                    self.check_stop(len(running))
+                    self.progress()
             except (KeyboardInterrupt, RunStopped) as exc:
-                stop.set()
                 executor.shutdown(wait=True, cancel_futures=True)
                 raise RunStopped(str(exc) or "stopped by Ctrl+C") from None
             executor.shutdown(wait=True)
+        self.peak, self.probe = max(self.peak, probe.peak_total), None
         self.journal.append(f"pool|{name}|{session}", [], wall_seconds=time.perf_counter() - t0, tasks=done_ids,
-                            peak_total_bytes=probe.peak_total, peak_encoder_bytes=probe.peak_encoder)
+                            peak_total_bytes=probe.peak_total, peak_encoder_bytes=probe.peak_encoder,
+                            stopped=self.stopping)
 
     def controls(self):
-        c = self.plan["controls"]
-        fragment = min((u for u, i in self.units.items() if i["level"] == "f"), default=None)
-        whole = min((u for u, i in self.units.items() if i["level"] == "m"), default=None)
-        for unit, qp in ([(fragment, q) for q in c["fragment_qps"]] if fragment else []) + \
-                        ([(whole, c["whole_qp"])] if whole else []):
-            task = f"control|{unit}|vtm|{qp}"
+        for task, unit, qp in control_ids(self.levels, self.plan):
+            if self.check_stop(0):
+                return
             if task not in self.journal.done:
                 info = self.units[unit]
                 self.record(task, [vtm_task(self.paths, unit, info["level"], np.ascontiguousarray(info["array"]), qp,
@@ -302,8 +456,8 @@ def summarise(rows, entries, controls_rows, refine):
     pools = {name: [e for e in entries if e["task"].startswith(f"pool|{name}|")] for name in ("whole", "fragments")}
     k = None
     if pools["fragments"]:
-        sessions = {e["task"].split("|", 2)[2] for e in pools["fragments"]}
-        secs = sum(r["seconds"] for r in rows if r["codec"] == "vtm" and r.get("session") in sessions
+        pool_ids = {e["task"].split("|", 2)[2] for e in pools["fragments"]}
+        secs = sum(r["seconds"] for r in rows if r["codec"] == "vtm" and r.get("session") in pool_ids
                    and r.get("phase") == "fragment" and r["seconds"] is not None)
         wall = sum(e["wall_seconds"] for e in pools["fragments"])
         k = secs / wall if wall else None
@@ -319,7 +473,8 @@ def summarise(rows, entries, controls_rows, refine):
         key = f"{r['level']}|{r['codec']}|{r['status']}"
         counts[key] = counts.get(key, 0) + 1
     return {"counts": counts, "k": k, "memory": memory, "determinism": det, "refinement": refine,
-            "pool_walls": {name: [e["wall_seconds"] for e in pools[name]] for name in pools}}
+            "pool_walls": {name: [e["wall_seconds"] for e in pools[name]] for name in pools},
+            "sessions": sessions(entries)}
 
 
 def summary_lines(record):
@@ -332,6 +487,13 @@ def summary_lines(record):
         lines.append((f"Строк: {e4_book.LEVELS[level]}, {e4_book.CODEC_NAMES[codec]}, {status}, шт", n))
     for unit, ref in sorted(s["refinement"].items()):
         lines.append((f"Уточнение PCC (VVC) снимка {unit}", ", ".join(map(str, ref["qps"])) if ref["qps"] else ref["reason"]))
+    for x in s["sessions"]:
+        wall = x["wall_s"] if x["wall_s"] is not None else x["last_progress_wall_s"]
+        lines.append((f"Сессия {x['session']}: начата, UTC; конец; стена, ч; взято из журнала, задач; записано задач; "
+                      "доведено после сигнала остановки",
+                      f"{x['started_utc']}; {x['end']}; {'—' if wall is None else f'{wall / 3600:.2f}'}"
+                      f"{'' if x['wall_s'] is not None else ' (не меньше)'}; {x['taken_from_journal']}; "
+                      f"{x['recorded_tasks']}; {'—' if x['finished_after_signal'] is None else x['finished_after_signal']}"))
     lines += [("Стена прогона (эта сессия), с", record["wall_seconds"]),
               ("Стена этапа «снимки» по сессиям, с", json.dumps(s["pool_walls"]["whole"])),
               ("Стена этапа «фрагменты» по сессиям, с", json.dumps(s["pool_walls"]["fragments"])),
@@ -341,8 +503,9 @@ def summary_lines(record):
               ("Память: один EncoderApp, снимки, ГиБ", s["memory"]["whole"]["peak_encoder_gib"]),
               ("Память: один EncoderApp, фрагменты, ГиБ", s["memory"]["fragments"]["peak_encoder_gib"]),
               ("Контроль детерминизма", json.dumps(s["determinism"], ensure_ascii=False)),
-              ("Продолжение: задач взято из журнала, шт", record["resumed_tasks"]),
-              ("Продолжение: задач со сбоем, выполненных снова, шт", record["retried_tasks"]),
+              ("Продолжение: задач взято из журнала (эта сессия), шт", record["resumed_tasks"]),
+              ("Продолжение: задач со сбоем, выполненных снова (эта сессия), шт", record["retried_tasks"]),
+              ("Повтор сразу после сбоя (эта сессия), задач, шт", record["retried_in_session"]),
               ("Продолжение: оборванных строк журнала, шт", record["torn_lines"])]
     return lines
 
@@ -353,7 +516,7 @@ def describe(record):
             *((f"{k} (до чисел)", v) for k, v in record["declared_before_numbers"].items()),
             ("Машина", json.dumps(record["machine"], ensure_ascii=False)),
             ("Где что", "«Просмотр» — единица в B1 (список: снимки D01…, фрагменты DNN_rRR_cCC); «Обзор» — уровень в B1 и "
-                        "метрика в B2; «Сводка» — счёт строк, уточнение снимков, время, память; «Строки» — все строки"),
+                        "метрика в B2; «Сводка» — счёт строк, уточнение снимков, сессии, время, память; «Строки» — все строки"),
             ("На пальцах", "Каждый снимок и каждый его фрагмент сжаты четырьмя кодеками при каждом значении PCC (у целых "
                            "снимков VVC — по сетке и уточнению у порога), и у каждого файла посчитаны три метрики; книга "
                            "показывает поведение метрик и степени сжатия.")]
@@ -367,57 +530,96 @@ def build_book(run_path, book_path):
     e4_book.build_book(run_path, book_path, describe, _check)
 
 
-def run(paths, units, plan, out_dir, state, timing, registry_sha, tiles_sha, stop_after=None, log=print):
-    """One session: continue the journal; at the end write the run file and the book."""
+def run(paths, units, plan, out_dir, state, timing, registry_sha, tiles_sha, hours=None, stop_after=None, log=print,
+        clock=time.monotonic, poll_s=POLL_S, progress_s=PROGRESS_S):
+    """One session: continue the journal until nothing is left or the session stops by plan; the session that leaves
+    no task unfinished writes the run file and the book. Returns (run file, book), or None when the run goes on."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     run_path, book_path, journal_path = out_dir / RUN_FILE, out_dir / BOOK_FILE, out_dir / JOURNAL_FILE
+    flag = out_dir / STOP_FLAG
     if run_path.exists():
         raise RunRefusal(f"{run_path} already exists: a run file of E4 is never overwritten")
+    if flag.exists():
+        raise RunRefusal(f"the flag {flag} lies beside the journal: a session would stop at once - remove it to start")
+    if journal_path.is_file():
+        began = e4_book.read_journal(journal_path)[0].get("core_commit")
+        if began != state["core_commit"]:
+            raise RunRefusal(f"the journal was started at core commit {began}, the code is now at "
+                             f"{state['core_commit']}: the code does not change between sessions - return to that "
+                             "commit to continue")
     try:
         journal = e4_book.Journal(journal_path, header_of(plan, state, registry_sha, tiles_sha, paths))
     except e4_book.JournalRefusal as exc:
         raise RunRefusal(str(exc)) from exc
+    levels = {u: i["level"] for u, i in units.items()}
+    k = 1 + sum(1 for e in journal.entries if entry_kind(e["task"]) == "session" and e["task"].endswith("|start"))
+    log = tee(log, out_dir / SESSION_LOG.format(k=k))
+    taken = sum(1 for t in journal.done if entry_kind(t) in ("task", "control"))
+    started, t0 = datetime.datetime.now(datetime.timezone.utc), clock()
+    journal.append(f"session|{k}|start", [], session=k, utc=started.isoformat(timespec="seconds"), hours=hours,
+                   core_commit=state["core_commit"], taken_from_journal=taken, failed_to_retry=journal.to_retry,
+                   torn_lines=journal.torn_lines)
     work = out_dir / WORK_DIR
+    shutil.rmtree(work, ignore_errors=True)
     if work.exists():
-        shutil.rmtree(work)
-        log(f"  removed the working folder of a stopped session: {WORK_DIR}")
-    work.mkdir()
-    started, t0 = datetime.datetime.now(datetime.timezone.utc), time.perf_counter()
+        log(f"  {WORK_DIR}: files of an earlier session could not be removed (a coder of a cut session may still hold "
+            "them); this session works beside them")
+    (work / f"session-{k}").mkdir(parents=True)
     log(f"{COMMAND}\n{QUESTION}\nDeclared before the numbers:")
     for key, text in DECLARED.items():
         log(f"  [{key}] {text}")
-    log(f"  journal: {journal.resumed} finished tasks taken over, {journal.to_retry} failed tasks to run again, "
+    log(f"  session {k}, " + (f"{hours:g} h" if hours else "no time limit") + f"; stop by plan: the empty file {flag}")
+    log(f"  journal: {taken} finished tasks taken over, {journal.to_retry} failed tasks to run again, "
         f"{journal.torn_lines} torn lines ignored")
-    runner = Runner(paths, units, plan, journal, work, timing, stop_after, log)
+    runner = Runner(paths, units, plan, journal, work / f"session-{k}", timing, k, t0, stop_after, log,
+                    None if hours is None else hours * 3600, flag, clock, poll_s, progress_s)
     try:
-        runner.pool("whole", runner.whole_tasks())
-        refine = runner.refinements()
-        refine_tasks = [runner.vtm(unit, qp, "refine") for unit, ref in refine.items() for qp in ref["qps"]]
-        runner.pool("fragments", refine_tasks + runner.fragment_tasks())
-        runner.controls()
-    except KeyboardInterrupt:
-        raise RunStopped("stopped by Ctrl+C") from None
+        runner.pool("whole", stage_tasks(levels, "m", plan, timing))
+        if not runner.stopping:
+            refine = refinements(levels, plan, journal.last)
+            runner.pool("fragments", refine_tasks(refine, plan, timing) + stage_tasks(levels, "f", plan, timing))
+        if not runner.stopping:
+            runner.controls()
+    except (KeyboardInterrupt, RunStopped) as exc:
+        log(f"  {exc or 'stopped by Ctrl+C'}: the started tasks are lost, the journal keeps the finished ones")
+        raise RunStopped(str(exc) or "stopped by Ctrl+C") from None
     finally:
         shutil.rmtree(work, ignore_errors=True)
+    missing, incomplete = unfinished(levels, plan, timing, journal.last)
+    wall = clock() - t0
+    runner.progress(force=True)
+    end = (f"stopped by plan ({runner.stopping})" if runner.stopping and missing else
+           "ended with tasks left" if missing else "finished the run")
+    journal.append(f"session|{k}|end", [], session=k, utc=utc_now(), end=end, wall_s=wall,
+                   finished_after_signal=runner.after_signal if runner.stopping else None, left=len(missing))
+    if flag.exists():
+        os.replace(flag, out_dir / f"{STOP_FLAG}.done-{k}")
+    if missing:
+        shutil.copyfile(journal_path, out_dir / SESSION_COPY.format(k=k))
+        log(f"  journal copied: {SESSION_COPY.format(k=k)}")
+        log(STOPPED if runner.stopping else
+            f"сессия закончена, не готово задач: {len(missing)} (снимков без законченной сетки: {len(incomplete)}) — "
+            "та же команда повторит их")
+        return None
     rows, controls_rows = [], []
     for task, task_rows in journal.last.items():
-        if task.startswith("control|"):
+        if entry_kind(task) == "control":
             controls_rows += task_rows
-        elif not task.startswith("pool|"):
+        elif entry_kind(task) == "task":
             rows += task_rows
     order = list(units)
     rows.sort(key=lambda r: (order.index(r["unit"]), e4_book.CODECS.index(r["codec"]), r["param"]))
-    summary = summarise(rows, journal.entries, controls_rows, runner.refinements())
+    summary = summarise(rows, journal.entries, controls_rows, refinements(levels, plan, journal.last))
     record = {
         "run": RUN_FILE, "study": "P001", "cycle": CYCLE, "question": QUESTION, "command": COMMAND,
-        "started_utc": started.isoformat(timespec="seconds"),
-        "finished_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
-        "wall_seconds": round(time.perf_counter() - t0, 1), **state, "declared_before_numbers": DECLARED, "plan": plan,
+        "started_utc": started.isoformat(timespec="seconds"), "finished_utc": utc_now(),
+        "wall_seconds": round(wall, 1), **state, "declared_before_numbers": DECLARED, "plan": plan,
         "machine": e4_book.machine(), "environment": {"python": platform.python_version(),
                                                      "imstudies": imstudies.__version__, "numpy": np.__version__},
-        "header": journal.header, "resumed_tasks": journal.resumed, "retried_tasks": journal.to_retry,
-        "torn_lines": journal.torn_lines, "units": {u: i["level"] for u, i in units.items()},
+        "header": journal.header, "resumed_tasks": taken, "retried_tasks": journal.to_retry,
+        "retried_in_session": len(runner.retried), "torn_lines": journal.torn_lines,
+        "units": {u: i["level"] for u, i in units.items()},
         "rows": rows, "controls": controls_rows, "summary": summary, "overview": e4_book.overview(rows),
     }
     record["summary_lines"] = summary_lines(record)
@@ -429,6 +631,44 @@ def run(paths, units, plan, out_dir, state, timing, registry_sha, tiles_sha, sto
         log(f"  {label}: {value}")
     log(f"Run file: {run_path} (sha256 {sha256_file(run_path)})\nBook: {book_path}")
     return run_path, book_path
+
+
+def status(out_dir, levels, plan, timing, now=None, log=print):
+    """Progress from the journal, running no task, while a session runs, after it stopped or after it was cut off:
+    the progress line, the last session and whether it runs - by the freshness of the journal."""
+    out_dir = Path(out_dir)
+    journal_path = out_dir / JOURNAL_FILE
+    if not journal_path.is_file():
+        log(f"no journal {JOURNAL_FILE} in {out_dir}: E4 has not started")
+        return None
+    now = time.time() if now is None else now
+    _, entries, torn = e4_book.read_journal(journal_path)
+    table = sessions(entries)
+    if not table:
+        log(f"the journal {JOURNAL_FILE} has no session yet")
+        return None
+    last = {}
+    for e in entries:
+        last[e["task"]] = e["rows"]
+    age = now - journal_path.stat().st_mtime
+    s = table[-1]
+    if (out_dir / RUN_FILE).is_file():
+        state = f"the run is finished, {RUN_FILE} is written"
+    elif s["end"] != "cut off":
+        state = s["end"]
+    elif age < FRESH_S:
+        state = "running"
+    else:
+        state = f"cut off - no end written, the journal silent for {age / 60:.0f} min"
+    if state == "running":
+        wall = now - datetime.datetime.fromisoformat(s["started_utc"]).timestamp()
+    else:
+        wall = s["wall_s"] if s["wall_s"] is not None else (s["last_progress_wall_s"] or 0.0)
+    peak = max((e.get("peak_total_bytes", 0) for e in entries if entry_kind(e["task"]) in ("pool", "progress")), default=0)
+    log(progress_line(levels, plan, timing, last, s["session"], wall, peak))
+    log(f"session {s['session']}: {state}; the journal changed {age / 60:.1f} min ago"
+        + (f"; torn lines {torn}" if torn and state != "running" else ""))
+    return state
 
 
 def plan_counts(registry, tile_rows, plan, timing):
@@ -473,8 +713,11 @@ def print_plan(p, log=print):
 
 def main(argv=None):
     for stream in (sys.stdout, sys.stderr):
-        stream.reconfigure(errors="replace")
+        stream.reconfigure(errors="replace", line_buffering=True)
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--hours", type=float, help="a session of H hours: then no new task is given, the started ones "
+                                                    "are finished; the same command continues")
+    parser.add_argument("--status", action="store_true", help="progress from the journal; runs no task")
     parser.add_argument("--plan", action="store_true", help="print the plan from the registry and the grid; no pixels")
     parser.add_argument("--rebuild-book", action="store_true", help="rebuild the book from the existing run file")
     args = parser.parse_args(argv)
@@ -487,6 +730,8 @@ def main(argv=None):
             build_book(out_dir / RUN_FILE, out_dir / BOOK_FILE)
             print(f"Book rebuilt and checked cell by cell: {out_dir / BOOK_FILE}")
             return 0
+        if args.hours is not None and not args.hours > 0:
+            raise RunRefusal(f"--hours {args.hours:g}: a session needs a positive number of hours")
         tiles_path = paths["cache_root"] / "cycles" / "9" / "p001_tiles.json"
         registry, tile_rows, tile = load_inputs(paths["data_root"], tiles_path)
         cycle11_path = paths["cache_root"] / "cycles" / "11" / "e4_dry.json"
@@ -498,11 +743,14 @@ def main(argv=None):
         if args.plan:
             print_plan(plan_counts(registry, tile_rows, FULL_PLAN, timing))
             return 0
+        if args.status:
+            status(out_dir, unit_levels(registry, tile_rows), FULL_PLAN, timing)
+            return 0
         if (out_dir / RUN_FILE).exists():
             raise RunRefusal(f"{out_dir / RUN_FILE} already exists: a run file of E4 is never overwritten")
         state = git_state(ROOT)
         units = load_units(paths["data_root"], registry, tile_rows, tile)
-        run(paths, units, FULL_PLAN, out_dir, state, timing, REGISTRY_SHA256, TILES_SHA256)
+        run(paths, units, FULL_PLAN, out_dir, state, timing, REGISTRY_SHA256, TILES_SHA256, hours=args.hours)
     except RunStopped as stop:
         print(f"STOPPED: {stop}. The journal keeps every finished task: run the same command to continue.",
               file=sys.stderr)

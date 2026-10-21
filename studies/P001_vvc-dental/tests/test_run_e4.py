@@ -10,13 +10,22 @@ table beside it, which the run must not read. VTM is a substitute coder with a g
 - the run: rows per image (19 grid + 3 refinement), whole images before fragments, slow first;
 - resume after a stop between the grid and the refinement and after one in the middle of the refinement:
   every refinement runs once, rows equal an uninterrupted run;
-- privacy: no invented name and no pixel array in the run file and the book;
-- --plan equals a count by hand; missing registry, grid or copy refused in words.
+- privacy: no invented name and no pixel array in the run file, the book, the journal and the session file;
+- --plan equals a count by hand; missing registry, grid or copy refused in words;
+- sessions (cycle 13; one coder process, so that the moment of a stop is exact): a stop by the deadline (a clock
+  of the test) and by the flag file - after the signal no task starts, the started one is in the journal, the
+  journal is copied, the flag renamed, the same command gives rows equal to an uninterrupted run; the progress
+  line counted by hand; the session file holds the output; --status of a running, a stopped and a cut-off session
+  (the journal unchanged by it); another commit refused; a failed grid node runs again once, right after the
+  failure, and the image is refined in the same session; failed twice - the grid waits for the next session and
+  the session writes no run file.
 """
 
 import hashlib
 import importlib.util
 import json
+import threading
+import time
 import zipfile
 from pathlib import Path
 
@@ -112,9 +121,9 @@ def setup(e4, tmp_path, monkeypatch):
     return root, paths, registry, tile_rows, units
 
 
-def run(e4, setup, out, **kw):
+def run(e4, setup, out, plan=PLAN, state=STATE, log=lambda *a: None, **kw):
     root, paths, _, _, units = setup
-    return e4.run(paths, units, PLAN, out, STATE, TIMING, "reg", "tiles", log=lambda *a: None, **kw)
+    return e4.run(paths, units, plan, out, state, TIMING, "reg", "tiles", log=log, **kw)
 
 
 def test_refinement_rule(e4):
@@ -176,7 +185,8 @@ def test_resume_between_grid_and_refinement_refines_once(e4, setup, tmp_path):
 
 def test_privacy_no_names_no_pixels(e4, setup, tmp_path):
     run_path, book_path = run(e4, setup, tmp_path / "out")
-    texts = [run_path.read_text(encoding="utf-8")]
+    texts = [run_path.read_text(encoding="utf-8"), (tmp_path / "out" / e4.JOURNAL_FILE).read_text(encoding="utf-8"),
+             (tmp_path / "out" / e4.SESSION_LOG.format(k=1)).read_text(encoding="utf-8")]
     with zipfile.ZipFile(book_path) as z:
         texts += [z.read(n).decode("utf-8", errors="ignore") for n in z.namelist()]
     for name in NAMES:
@@ -221,3 +231,185 @@ def test_missing_inputs_refused_in_words(e4, setup):
     (paths["data_root"] / "registry" / "P001.json").rename(root / "moved.json")
     with pytest.raises(e4.RunRefusal, match="the registry data/registry/P001.json does not exist"):
         e4.load_inputs(paths["data_root"], tiles, pins=(None, None))
+
+
+# ---------------------------------------------------------------- sessions (cycle 13)
+
+PLAN1 = PLAN | {"pool": 1}  # one coder process: the moment of a stop is exact
+TOTAL = 2 * (19 + 3 + 3) + 4 * (2 + 3)  # tasks: per image grid, refinement, JPEG/HEIF/AVIF; per fragment VTM, three
+
+
+class Fake:
+    """Substitute coders that note every start; `fail` - task id: how many times it fails before it works;
+    `trigger` - (n, action): when the n-th task starts, action() runs and that task waits (up to 5 s) until the run
+    says that it stops by plan."""
+
+    def __init__(self, e4, still, fail=None, trigger=None):
+        self.e4, self.real_still, self.fail, self.trigger = e4, still, dict(fail or {}), trigger
+        self.events, self.lines, self.lock, self.release, self.starts = [], [], threading.Lock(), threading.Event(), 0
+
+    def started(self, task):
+        with self.lock:
+            self.starts += 1
+            n = self.starts
+            self.events.append(("start", task))
+        if self.trigger and n == self.trigger[0]:
+            self.trigger[1]()
+            self.release.wait(5)
+
+    def vtm(self, paths, unit, level, image, qp, work):
+        task = f"{unit}|vtm|{qp}"
+        self.started(task)
+        with self.lock:
+            failing = self.fail.get(task, 0) > 0
+            self.fail[task] = self.fail.get(task, 0) - failing
+        if failing:
+            return self.e4.e4_book.error_row(unit, level, "vtm", qp, RuntimeError("substitute failure"))
+        return fake_vtm(paths, unit, level, image, qp, work)
+
+    def still(self, paths, unit, level, image, codec, values, work):
+        self.started(f"{unit}|{codec}|batch")
+        return self.real_still(paths, unit, level, image, codec, values, work)
+
+    def log(self, text):
+        with self.lock:
+            self.events.append(("log", text))
+            self.lines.append(text)
+        if "planned stop" in text:
+            self.release.set()
+
+
+@pytest.fixture()
+def fake(e4, setup, monkeypatch):
+    real_still = e4.still_task
+
+    def make(**kw):
+        f = Fake(e4, real_still, **kw)
+        monkeypatch.setattr(e4, "vtm_task", f.vtm)
+        monkeypatch.setattr(e4, "still_task", f.still)
+        return f
+    return make
+
+
+def reference(e4, setup, fake, tmp_path):
+    """Rows of an uninterrupted run in one session."""
+    run_path, _ = run(e4, setup, tmp_path / "reference", plan=PLAN1, log=fake().log)
+    return keyed(run_path)[1]
+
+
+def journal(e4, out):
+    return [json.loads(line) for line in (out / e4.JOURNAL_FILE).read_text(encoding="utf-8").splitlines()[1:]]
+
+
+def stopped_at(f, reason):
+    """Tasks started before the run said it stops by plan; True if none started after."""
+    stop = next(i for i, (what, text) in enumerate(f.events) if what == "log" and f"planned stop ({reason})" in text)
+    return [t for what, t in f.events[:stop] if what == "start"], not any(what == "start" for what, _ in f.events[stop:])
+
+
+def test_stop_by_deadline_finishes_the_started_task_and_the_same_command_continues(e4, setup, fake, tmp_path):
+    expected = reference(e4, setup, fake, tmp_path)
+    now = [0.0]
+    f = fake(trigger=(5, lambda: now.__setitem__(0, 1000.0)))  # the 5th task starts at 1000 s: past 0.25 h
+    out = tmp_path / "out"
+    assert run(e4, setup, out, plan=PLAN1, log=f.log, hours=0.25, clock=lambda: now[0], poll_s=0.01) is None
+    started, none_after = stopped_at(f, "deadline")
+    assert len(started) == 5 and none_after
+    entries = journal(e4, out)
+    assert {e["task"] for e in entries if e4.entry_kind(e["task"]) == "task"} == set(started)  # the started one too
+    end = [e for e in entries if e["task"] == "session|1|end"]
+    assert end[0]["end"] == "stopped by plan (deadline)" and end[0]["finished_after_signal"] == 1
+    assert (out / e4.SESSION_COPY.format(k=1)).read_bytes() == (out / e4.JOURNAL_FILE).read_bytes()
+    assert f.lines[-1] == e4.STOPPED
+    assert (out / e4.SESSION_LOG.format(k=1)).read_text(encoding="utf-8").splitlines() == "\n".join(f.lines).splitlines()
+    # the progress line at the stop, by hand: done - the grid at QP -12, -12, -8, -8, -4 (slow first)
+    vtm_m = lambda q: 600.0 - 8 * (q + 12) + 0.9  # noqa: E731
+    rest = (2 * sum(vtm_m(q) for q in GRID) - sum(vtm_m(q) for q in (-12, -12, -8, -8, -4))
+            + 2 * sum(vtm_m(q) for q in (25, 26, 27))  # refinement not known yet: the QPs of the dry run
+            + 2 * (0.01 + 0.02 + 0.8 + 1.2 + 0.4 + 0.4 + 6 * 0.9)
+            + 4 * (8.0 + 2.0 + 2 * 0.05 + 0.001 + 0.002 + 0.05 + 0.08 + 0.04 + 0.04 + 6 * 0.05))
+    line = [x for x in f.lines if x.startswith("progress")][-1]
+    assert (f"session 1, wall 0.28 h | done 5/{TOTAL} tasks: whole images VVC (VTM) 5/44, JPEG 0/2, HEIF 0/2, AVIF "
+            "0/2; fragments VVC (VTM) 0/8, JPEG 0/4, HEIF 0/4, AVIF 0/4; controls 0/2 | error: 0 rows, 0 tasks to run "
+            f"again | expected rest {rest / 3.5 / 3600:.2f} h") in line
+    resumed, _ = run(e4, setup, out, plan=PLAN1, log=f.log)
+    record, rows = keyed(resumed)
+    assert rows == expected and record["resumed_tasks"] == 5
+
+
+def test_stop_by_flag_and_status_of_a_running_and_a_stopped_session(e4, setup, fake, tmp_path):
+    _, _, registry, tile_rows, _ = setup
+    levels = e4.unit_levels(registry, tile_rows)
+    expected = reference(e4, setup, fake, tmp_path)
+    out, seen = tmp_path / "out", []
+
+    def signal():
+        seen.append(e4.status(out, levels, PLAN1, TIMING, log=lambda *a: None))  # while the session runs
+        (out / e4.STOP_FLAG).write_bytes(b"")
+
+    f = fake(trigger=(5, signal))
+    assert run(e4, setup, out, plan=PLAN1, log=f.log, poll_s=0.01) is None
+    assert seen == ["running"]
+    started, none_after = stopped_at(f, "flag")
+    assert len(started) == 5 and none_after
+    assert {e["task"] for e in journal(e4, out) if e4.entry_kind(e["task"]) == "task"} == set(started)
+    assert not (out / e4.STOP_FLAG).exists() and (out / f"{e4.STOP_FLAG}.done-1").is_file()
+    assert (out / e4.SESSION_COPY.format(k=1)).read_bytes() == (out / e4.JOURNAL_FILE).read_bytes()
+    assert f.lines[-1] == e4.STOPPED
+    lines = []
+    assert e4.status(out, levels, PLAN1, TIMING, log=lines.append) == "stopped by plan (flag)"
+    at_stop = [x for x in f.lines if x.startswith("progress")][-1]
+    assert lines[0].split(" | ")[2:5] == at_stop.split(" | ")[2:5]  # the same counts and rest, from the journal
+    resumed, _ = run(e4, setup, out, plan=PLAN1, log=f.log)
+    assert keyed(resumed)[1] == expected
+    assert e4.status(out, levels, PLAN1, TIMING, log=lines.append).startswith("the run is finished")
+
+
+def test_status_of_a_cut_session_reads_only_and_another_commit_is_refused(e4, setup, fake, tmp_path):
+    _, _, registry, tile_rows, _ = setup
+    levels = e4.unit_levels(registry, tile_rows)
+    out = tmp_path / "out"
+    f = fake()
+    with pytest.raises(e4.RunStopped):
+        run(e4, setup, out, plan=PLAN1, log=f.log, stop_after=3)  # as Ctrl+C: the session writes no end
+    with open(out / e4.JOURNAL_FILE, "a", encoding="utf-8") as j:
+        j.write('{"task": "D01|vtm|')  # a line torn by a killed process
+    before = hashlib.sha256((out / e4.JOURNAL_FILE).read_bytes()).hexdigest()
+    lines = []
+    state = e4.status(out, levels, PLAN1, TIMING, now=time.time() + 3600, log=lines.append)
+    assert state.startswith("cut off") and lines[-1].endswith("; torn lines 1") and f"done 3/{TOTAL} tasks" in lines[0]
+    assert hashlib.sha256((out / e4.JOURNAL_FILE).read_bytes()).hexdigest() == before
+    with pytest.raises(e4.RunRefusal, match="the journal was started at core commit test, the code is now at other"):
+        run(e4, setup, out, plan=PLAN1, state={"core_commit": "other", "core_tree": "test"})
+
+
+def test_a_failed_grid_node_runs_again_at_once_and_the_image_is_refined_in_the_same_session(e4, setup, fake, tmp_path):
+    f = fake(fail={"D01|vtm|20": 1})
+    run_path, _ = run(e4, setup, tmp_path / "out", plan=PLAN1, log=f.log)
+    starts = [t for what, t in f.events if what == "start"]
+    first = starts.index("D01|vtm|20")
+    assert starts[first + 1] == "D01|vtm|20" and starts.count("D01|vtm|20") == 2  # right after the failure, once
+    entries = journal(e4, tmp_path / "out")
+    assert [e["rows"][0]["status"] for e in entries if e["task"] == "D01|vtm|20"] == ["error", "valid"]
+    record = json.loads(run_path.read_text(encoding="utf-8"))
+    assert record["summary"]["refinement"]["D01"] == {"qps": [21, 22, 23], "reason": None}
+    assert record["retried_in_session"] == 1
+    assert [s["end"] for s in record["summary"]["sessions"]] == ["finished the run"]
+
+
+def test_a_node_failed_twice_leaves_the_grid_to_the_next_session(e4, setup, fake, tmp_path):
+    expected = reference(e4, setup, fake, tmp_path)
+    out = tmp_path / "out"
+    f = fake(fail={"D01|vtm|20": 2})
+    assert run(e4, setup, out, plan=PLAN1, log=f.log) is None and not (out / e4.RUN_FILE).exists()
+    assert f.lines[-1] == ("сессия закончена, не готово задач: 4 (снимков без законченной сетки: 1) — та же команда "
+                           "повторит их")
+    entries = journal(e4, out)
+    assert [e["rows"][0]["status"] for e in entries if e["task"] == "D01|vtm|20"] == ["error", "error"]
+    assert {e["task"] for e in entries for r in e["rows"] if r.get("phase") == "refine"} == {
+        "D02|vtm|1", "D02|vtm|2", "D02|vtm|3"}
+    resumed, _ = run(e4, setup, out, plan=PLAN1, log=f.log)
+    record, rows = keyed(resumed)
+    assert rows == expected and record["retried_tasks"] == 1
+    assert record["summary"]["refinement"]["D01"]["qps"] == [21, 22, 23]
+    assert [s["end"] for s in record["summary"]["sessions"]] == ["ended with tasks left", "finished the run"]
