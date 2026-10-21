@@ -1,8 +1,9 @@
 """P001, B11: how many 512 x 512 tiles of the 16 images keep share_any (background and frame) at or below 10, 25, 50 %? Run: python studies/P001_vvc-dental/run_p001_tiles.py
 
-Study P001, cycle 8, stage E3: contract ../REFERENCE.md#b11 through imstudies.lab.p001_tiles. Reads the
-copy of B10 (data_root), measures four shares per full tile, counts tiles per image and over the set,
-writes <cache_root>/cycles/8/p001_tiles.json (refuses by name if it exists), the book p001_tiles.xlsx and
+Study P001, cycle 9, stage E3: contract ../REFERENCE.md#b11 0.2.0 through imstudies.lab.p001_tiles. Reads
+the copy of B10 (data_root), lays the grid centred in every image (origin "center", passed explicitly;
+cycle 8 used "top_left"), measures four shares per full tile, counts tiles per image and over the set,
+writes <cache_root>/cycles/9/p001_tiles.json (refuses by name if it exists), the book p001_tiles.xlsx and
 the pages for the owner's eyes in p001_tiles_pages/ beside it (local, outside Git). Prints codes and
 counts only. The counts are a measurement for the owner's choice, not an exclusion rule.
 `--rebuild-book` rebuilds the book from the run file and carries the owner's verdicts by page file.
@@ -27,7 +28,8 @@ ROOT = STUDY.parents[1]
 COMMAND = "python studies/P001_vvc-dental/run_p001_tiles.py"
 QUESTION = ("P001, B11: сколько фрагментов 512 × 512 у каждого снимка и в наборе имеют долю фона и рамки share_any "
             "не больше 10, 25 и 50 %?")
-CYCLE, RUN_FILE, BOOK_FILE, PAGES_DIR = 8, "p001_tiles.json", "p001_tiles.xlsx", "p001_tiles_pages"
+CYCLE, RUN_FILE, BOOK_FILE, PAGES_DIR = 9, "p001_tiles.json", "p001_tiles.xlsx", "p001_tiles_pages"
+ORIGIN = "center"  # B11 0.2.0, owner decision 2026-10-20, 19:21 UTC
 DECLARED = {
     "data": "Копия B10 0.2.0 (data/P001, реестр); роль check у всех снимков; пороги на них не подбираются.",
     "measurements": (f"share_white — доля пикселей ≥ {tiles.WHITE}; share_black — ≤ {tiles.BLACK}; share_flat — доля "
@@ -36,8 +38,10 @@ DECLARED = {
                      f"блока — целиком. Пороги — параметры измерения (B11), ПРЕДПОЛОЖЕНИЕ: рамка насыщена, фон однороден."),
     "selection": "В книге — число фрагментов с share_any ≤ 10, 25, 50 % по снимку и по набору; это не правило "
                  "исключения — его выбирает владелец по счёту.",
-    "grid": "Сетка 512 × 512 от левого верхнего угла без перекрытия, только полные фрагменты; остатки не используются; "
-            "число фрагментов снимка обязано равняться full_tiles реестра B10.",
+    "grid": "Сетка 512 × 512 по центру снимка (B11 0.2.0, origin = center): x0 = ⌊(W − 512·n_c)/2⌋, "
+            "y0 = ⌊(H − 512·n_r)/2⌋, лишний пиксель нечётного остатка — справа и снизу; без перекрытия, только полные "
+            "фрагменты; остатки по обе стороны не используются; число фрагментов снимка обязано равняться full_tiles "
+            "реестра B10.",
     "pages": "Страницы для глаз: одна на снимок (все снимки) — уменьшенная картинка (среднее блоков 4 × 4) с сеткой и "
              "share_any в каждом фрагменте; локально, вне Git, ассистенту не передаются; вердикт — лист «Страницы».",
     "claim": "Утверждение страницы собирается из строки снимка файла прогона: число фрагментов, счёт при 10 / 25 / 50 % и "
@@ -75,8 +79,8 @@ def run(data_root, out_dir, state, log=print):
     for key, text in DECLARED.items():
         log(f"  [{key}] {text}")
     registry, images = tiles.load_copy(data_root)
-    rows = tiles.measure(images)
-    per = tiles.per_image(registry, rows)
+    rows = tiles.measure(images, origin=ORIGIN)
+    per = tiles.per_image(registry, rows, origin=ORIGIN)
     totals = tiles.set_totals(per)
     pages_dir.mkdir()
     pages = []
@@ -93,7 +97,7 @@ def run(data_root, out_dir, state, log=print):
         "started_utc": started.isoformat(timespec="seconds"),
         "finished_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
         **state, "contract": tiles.CONTRACT, "declared_before_numbers": DECLARED,
-        "parameters": {"tile": tiles.TILE, "block": tiles.BLOCK, "white": tiles.WHITE, "black": tiles.BLACK,
+        "parameters": {"origin": ORIGIN, "tile": tiles.TILE, "block": tiles.BLOCK, "white": tiles.WHITE, "black": tiles.BLACK,
                        "flat_std": tiles.FLAT_STD, "selection_shares": list(tiles.SELECTION), "page_scale": tiles.PAGE_SCALE},
         "registry": {"file": "data/registry/P001.json", "sha256": sha256_file(Path(data_root) / "registry" / "P001.json"),
                      "contract": registry.get("contract"), "core_commit": registry.get("core_commit")},
@@ -118,7 +122,8 @@ def run(data_root, out_dir, state, log=print):
     return run_path, book_path
 
 
-PER = [("Код", "code"), ("H, пикс.", "H"), ("W, пикс.", "W"), ("Фрагментов всего, шт", "n_tiles"),
+PER = [("Код", "code"), ("H, пикс.", "H"), ("W, пикс.", "W"), ("Положение сетки", "origin"), ("x0, пикс.", "x0"),
+       ("y0, пикс.", "y0"), ("Фрагментов всего, шт", "n_tiles"),
        ("share_any ≤ 10 %, шт", "n_any_le_10"), ("share_any ≤ 25 %, шт", "n_any_le_25"),
        ("share_any ≤ 50 %, шт", "n_any_le_50"), ("Наибольшая share_any, %", "max_share_any")]
 ROWS = [("Фрагмент", "tile"), ("Код", "code"), ("Строка сетки", "r"), ("Столбец сетки", "c"), ("x, пикс.", "x"),
@@ -211,10 +216,10 @@ def build_book(run_path, book_path, verdicts=None):
         chart.y_axis.title, chart.x_axis.title = "фрагментов, шт", "код снимка"
         chart.x_axis.delete = chart.y_axis.delete = False
         sheet = wb["Таблица"]
-        chart.add_data(Reference(sheet, min_col=4, max_col=7, min_row=1, max_row=2 + n), titles_from_data=True)
+        chart.add_data(Reference(sheet, min_col=7, max_col=10, min_row=1, max_row=2 + n), titles_from_data=True)
         chart.set_categories(Reference(sheet, min_col=1, min_row=3, max_row=2 + n))
         chart.width, chart.height = 28, 12
-        sheet.add_chart(chart, "J2")
+        sheet.add_chart(chart, "M2")
     wb.save(book_path)
     check_book(run_path, book_path)
 

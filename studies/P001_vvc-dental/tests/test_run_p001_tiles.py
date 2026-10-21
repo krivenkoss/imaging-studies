@@ -53,6 +53,9 @@ def test_run_book_pages_and_verdicts(tiles_run, tmp_path):
     run_path, book_path = tiles_run.run(data, out, state, log=lines.append)
     record = json.loads(run_path.read_text(encoding="utf-8"))
     assert [(e["code"], e["n_tiles"]) for e in record["per_image"]] == [("D01", 6), ("D02", 1)]
+    # centred grid (B11 0.2.0): D01 1100 x 1600 -> x0 = 64 // 2, y0 = 76 // 2; D02 600 x 700 -> 188 // 2, 88 // 2
+    assert [(e["origin"], e["x0"], e["y0"]) for e in record["per_image"]] == [("center", 32, 38), ("center", 94, 44)]
+    assert record["parameters"]["origin"] == "center" and record["rows"][0]["x"] == 32 and record["rows"][0]["y"] == 38
     assert record["set"]["n_tiles"] == 7 and record["set"]["best_achievable_images"] == 2
     for e, page in zip(record["per_image"], record["pages"]):
         tiles_run.tiles.check_statement(page["claim"], e)

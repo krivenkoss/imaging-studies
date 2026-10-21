@@ -1,13 +1,15 @@
 """Grid of 512 x 512 tiles of the P001 copy and the share of background and frame in every tile (B11).
 
 Contract: ../REFERENCE.md#b11 (one level above this repository). Reads data/registry/P001.json and
-data/P001/DNN.png of B10 0.2.0, checks png_sha256 of every copy, lays the grid of full tiles from the
-top-left corner without overlap (remainders unused) and measures per tile:
+data/P001/DNN.png of B10 0.2.0, checks png_sha256 of every copy, lays the grid of full tiles without
+overlap - centred in the image (0.2.0: x0 = floor((W - 512 n_c) / 2), y0 = floor((H - 512 n_r) / 2), the odd
+pixel of a remainder right and below) or from the top-left corner (0.1.0, the default of `origin`, kept for
+the calls of 0.6.0 and the repetition of cycle 8) - remainders unused, and measures per tile:
 
 - share_white - pixels >= 250;
 - share_black - pixels <= 5;
 - share_flat - 8 x 8 blocks of the tile's own grid whose standard deviation is < 1.0 level
-  (numpy std over the 64 values in float64, ddof = 0);
+  (numpy std over the 64 values in float64, ddof = 0 - written into B11 0.2.0);
 - share_any - pixels in at least one of the three masks, a pixel of a flat block counted whole.
 
 Shares are integer counts divided by the number of pixels (blocks for share_flat). The thresholds are
@@ -26,7 +28,8 @@ from PIL import Image
 from imstudies.lab.p001 import MAX_PIXELS
 from imstudies.lab.runs import RunRefusal
 
-CONTRACT = "B11 0.1.0"
+CONTRACT = "B11 0.2.0"
+ORIGINS = ("top_left", "center")
 TILE, BLOCK = 512, 8
 WHITE, BLACK, FLAT_STD = 250, 5, 1.0
 SELECTION = (0.10, 0.25, 0.50)  # share_any thresholds counted in the book; not an exclusion rule
@@ -65,9 +68,19 @@ def load_copy(data_root):
     return registry, images
 
 
-def grid(h, w):
-    """Full tiles from the top-left corner: (row, column, x, y) in pixels; remainders at the edges unused."""
-    return [(r, c, c * TILE, r * TILE) for r in range(h // TILE) for c in range(w // TILE)]
+def offsets(h, w, origin="top_left"):
+    """Corner (x0, y0) of the grid in pixels: (0, 0) for "top_left" (0.1.0); centred for "center" (0.2.0)."""
+    if origin not in ORIGINS:
+        raise ValueError(f"origin {origin!r}: one of {ORIGINS}")
+    if origin == "top_left":
+        return 0, 0
+    return (w - TILE * (w // TILE)) // 2, (h - TILE * (h // TILE)) // 2
+
+
+def grid(h, w, origin="top_left"):
+    """Full tiles: (row, column, x, y) of the top-left corner in pixels; remainders unused."""
+    x0, y0 = offsets(h, w, origin)
+    return [(r, c, x0 + c * TILE, y0 + r * TILE) for r in range(h // TILE) for c in range(w // TILE)]
 
 
 def tile_shares(tile):
@@ -84,24 +97,26 @@ def tile_shares(tile):
             "share_flat": int(flat_blocks.sum()) / flat_blocks.size, "share_any": int((white | black | flat).sum()) / n}
 
 
-def measure(images):
+def measure(images, origin="top_left"):
     """One row per tile: id DNN_rRR_cCC, code, row, column, corner in pixels, four shares."""
     rows = []
     for img in images:
-        for r, c, x, y in grid(*img["values"].shape):
+        for r, c, x, y in grid(*img["values"].shape, origin=origin):
             rows.append({"tile": f"{img['code']}_r{r:02d}_c{c:02d}", "code": img["code"], "r": r, "c": c, "x": x, "y": y,
                          **tile_shares(np.ascontiguousarray(img["values"][y:y + TILE, x:x + TILE]))})
     return rows
 
 
-def per_image(registry, rows):
+def per_image(registry, rows, origin="top_left"):
     """Per code: tiles in all and with share_any <= each selection share; the count must equal B10's full_tiles."""
     out = []
     for entry in registry["images"]:
         mine = [r for r in rows if r["code"] == entry["code"]]
         if len(mine) != entry["full_tiles"]:
             raise RunRefusal(f"{entry['code']}: {len(mine)} tiles, the registry says {entry['full_tiles']}")
-        out.append({"code": entry["code"], "H": entry["H"], "W": entry["W"], "n_tiles": len(mine),
+        x0, y0 = offsets(entry["H"], entry["W"], origin)
+        out.append({"code": entry["code"], "H": entry["H"], "W": entry["W"], "origin": origin, "x0": x0, "y0": y0,
+                    "n_tiles": len(mine),
                     **{f"n_any_le_{round(t * 100)}": sum(r["share_any"] <= t for r in mine) for t in SELECTION},
                     "max_share_any": max((r["share_any"] for r in mine), default=None)})
     return out

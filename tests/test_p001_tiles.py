@@ -7,6 +7,8 @@ Tiles: all 255, all 0, flat grey 128, noise sigma = 10, half frame / half noise,
 sizes not divisible by 512, a copy whose png_sha256 differs from the registry is refused, the page claim
 is checked against its run-file entry and fails on swapped fields, the page carries the four parts of
 the explanation.
+B11 0.2.0: offsets of the centred grid written by hand (1504 x 2773, 1488 x 2789, odd remainder, multiple
+of 512); with origin "top_left" the real copy gives the rows of the cycle 8 run file bit for bit (lab).
 """
 
 import hashlib
@@ -79,6 +81,38 @@ def test_shares_against_the_loop_oracle(tiles, name):
 def test_grid_on_sizes_not_divisible_by_512(tiles):
     assert len(tiles.grid(1504, 2773)) == 2 * 5 and tiles.grid(1504, 2773)[-1] == (1, 4, 4 * 512, 512)
     assert tiles.grid(511, 4000) == [] and len(tiles.grid(1024, 1024)) == 4 and len(tiles.grid(1535, 1023)) == 2
+
+
+def test_centred_grid_offsets_by_hand(tiles):
+    # (H, W) -> (x0, y0): remainders 213 and 480 -> (106, 240); 229 and 464 -> (114, 232); odd 3 and 3 -> (1, 1)
+    assert tiles.offsets(1504, 2773, "center") == (106, 240)
+    assert tiles.offsets(1488, 2789, "center") == (114, 232)
+    assert tiles.offsets(1027, 1539, "center") == (1, 1)
+    assert tiles.offsets(1024, 1536, "center") == (0, 0) and tiles.offsets(1504, 2773, "top_left") == (0, 0)
+    centred = tiles.grid(1504, 2773, origin="center")
+    assert len(centred) == 10 and centred[0] == (0, 0, 106, 240) and centred[-1] == (1, 4, 106 + 4 * 512, 240 + 512)
+    assert tiles.grid(1504, 2773) == tiles.grid(1504, 2773, origin="top_left")  # the default is 0.1.0
+    with pytest.raises(ValueError, match="origin 'middle'"):
+        tiles.grid(1504, 2773, origin="middle")
+
+
+def test_top_left_repeats_cycle_8_bitwise(tiles):
+    """Regression on the real copy (lab): with origin "top_left" every share equals the run file of cycle 8."""
+    from pathlib import Path
+
+    core = Path(__file__).resolve().parents[1]
+    if not (core / "lab_paths.json").is_file():
+        pytest.skip("lab_paths.json is absent: the laboratory is not configured on this machine")
+    raw = json.loads((core / "lab_paths.json").read_text(encoding="utf-8"))
+    data_root, cache_root = (core / raw["data_root"]).resolve(), (core / raw["cache_root"]).resolve()
+    cycle8 = cache_root / "cycles" / "8" / "p001_tiles.json"
+    if not cycle8.is_file() or not (data_root / "registry" / "P001.json").is_file():
+        pytest.skip("the copy of B10 or the run file of cycle 8 is absent on this machine")
+    registry, images = tiles.load_copy(data_root)
+    rows = tiles.measure(images, origin="top_left")
+    old = json.loads(cycle8.read_text(encoding="utf-8"))["rows"]
+    assert len(rows) == len(old) == 154
+    assert rows == old  # tile ids, corners and the four shares, bit for bit
 
 
 def write_copy(root, shapes, seed=0):
