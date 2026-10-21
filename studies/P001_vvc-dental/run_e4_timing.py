@@ -107,8 +107,16 @@ def mosaic(tiles, shape):
 
 
 def vtm_call(task):
-    """B05 then B09 for one QP; seconds of each and of both, sha256 of stream and HEIF file."""
-    paths, image, qp, timeout_s, work = task
+    """B05 then B09 for one QP; seconds of each and of both, sha256 of stream and HEIF file. A failure of a wrapper
+    is a row with status error (no sha256), so the comparison of pool and sequential run records the stop."""
+    try:
+        return {"status": "valid"} | _vtm_call(*task)
+    except Exception as exc:  # noqa: BLE001 - status `error` by SPEC-RESULT; the run records it
+        return {"param": task[2], "status": "error", "detail": f"{type(exc).__name__}: {str(exc)[:400]}",
+                "seconds": None, "file_bytes": None, "file_sha256": None, "bitstream_sha256": None}
+
+
+def _vtm_call(paths, image, qp, timeout_s, work):
     t0 = time.perf_counter()
     coded = vtm.encode_decode(image, qp, max_pixels=image.size, level=LEVEL, frame_rate=FRAME_RATE, timeout_s=timeout_s,
                               encoder=paths["encoder"], decoder=paths["decoder"], cfg=paths["cfg"], work_root=work)
@@ -151,7 +159,7 @@ def vtm_set(paths, size, image, qps, work, workers):
     load = busy_share(before, cpu_busy())
     h, w = image.shape
     return [r | {"image": size, "codec": "vtm", "mode": workers, "set_wall_seconds": wall, "cpu_busy_share": load,
-                 "cr_file": h * w / r["file_bytes"]} for r in results], wall
+                 "cr_file": h * w / r["file_bytes"] if r["file_bytes"] else None} for r in results], wall
 
 
 def still_set(paths, size, image, codec, params, work):
@@ -274,12 +282,15 @@ def _run(paths, images, plan, run_path, book_path, state, work):
         seq, walls[size, 1] = vtm_set(paths, size, image, plan["vtm"][size], work, 1)
         pool, walls[size, POOL] = vtm_set(paths, size, image, plan["vtm"][size], work, POOL)
         rows += seq + pool
-        same = all(a["file_sha256"] == b["file_sha256"] and a["bitstream_sha256"] == b["bitstream_sha256"]
-                   for a, b in zip(seq, pool))
+        same = all(a["status"] == b["status"] == "valid" and a["file_sha256"] == b["file_sha256"]
+                   and a["bitstream_sha256"] == b["bitstream_sha256"] for a, b in zip(seq, pool))
         print(f"  VTM ({size}): {len(seq)} QP, sequential {walls[size, 1]:.1f} s, pool of {POOL} {walls[size, POOL]:.1f} s, "
               f"pool = sequential by sha256: {same}")
         if not same:
-            stopped = f"VTM ({size}): files of the pool differ from the sequential run"
+            bad = [f"QP {a['param']}" + (f" ({b['detail'][:120]})" if b["status"] != "valid" else "")
+                   for a, b in zip(seq, pool) if not (a["status"] == b["status"] == "valid" and
+                                                      a["file_sha256"] == b["file_sha256"])]
+            stopped = f"VTM ({size}): pool differs from the sequential run in {len(bad)} of {len(seq)} QP: {bad[:5]}"
             break
     if not stopped:
         for size in ("f", "m"):
@@ -290,8 +301,8 @@ def _run(paths, images, plan, run_path, book_path, state, work):
             rows += metric_rows(size, images[size], plan["metric_repeats"])
     for k, r in enumerate(rows, start=1):
         r["row_index"] = k
-    k_f = walls["f", 1] / walls["f", POOL] if ("f", POOL) in walls else None
-    k_m = walls["m", 1] / walls["m", POOL] if ("m", POOL) in walls else None
+    k_f = walls["f", 1] / walls["f", POOL] if not stopped else None
+    k_m = walls["m", 1] / walls["m", POOL] if not stopped else None
     record = {
         "run": RUN_FILE, "study": "P001", "cycle": CYCLE, "question": QUESTION, "command": COMMAND,
         "started_utc": started.isoformat(timespec="seconds"),
@@ -331,16 +342,18 @@ def summary_rows(record):
     walls = {(w["image"], w["mode"]): w["seconds"] for w in record["set_walls"]}
     out = []
     for (codec, image, mode), rs in sorted(groups.items()):
-        s = [r["seconds"] for r in rs]
-        out.append({"codec": codec, "image": image, "mode": mode, "n": len(rs), "median_s": statistics.median(s),
-                    "min_s": min(s), "max_s": max(s), "set_wall_s": walls.get((image, mode)) if codec == "vtm" else None})
+        s = [r["seconds"] for r in rs if r["seconds"] is not None]
+        out.append({"codec": codec, "image": image, "mode": mode, "n": len(rs),
+                    "median_s": statistics.median(s) if s else None, "min_s": min(s, default=None),
+                    "max_s": max(s, default=None), "set_wall_s": walls.get((image, mode)) if codec == "vtm" else None})
     return out
 
 
 ROWS = [("№", "row_index"), ("Изображение (f/m)", "image"), ("Кодек или метрика", "codec"), ("Параметр", "param"),
         ("Режим, процессов", "mode"), ("Секунды вызова, с", "seconds"), ("B05, с", "seconds_b05"), ("B09, с", "seconds_b09"),
         ("Стена набора, с", "set_wall_seconds"), ("Файл, байт", "file_bytes"), ("CR, безразм.", "cr_file"),
-        ("PSNR, дБ (не результат)", "psnr_db"), ("Повтор", "repeat"), ("sha256 файла", "file_sha256")]
+        ("PSNR, дБ (не результат)", "psnr_db"), ("Повтор", "repeat"), ("sha256 файла", "file_sha256"),
+        ("Статус (VTM)", "status"), ("Сбой", "detail")]
 SUMMARY = [("Кодек", "codec"), ("Размер (f/m)", "image"), ("Режим, процессов", "mode"), ("Вызовов, шт", "n"),
            ("Медиана, с", "median_s"), ("Наименьшее, с", "min_s"), ("Наибольшее, с", "max_s"),
            ("Стена набора, с", "set_wall_s")]

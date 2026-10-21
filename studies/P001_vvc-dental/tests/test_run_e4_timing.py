@@ -8,6 +8,8 @@
   images; lab_paths.json with the coders and the B12 environment needed): the pool equals the sequential run,
   the estimate equals the hand formula on the rows of the run file, the book equals the run file and refuses a
   changed cell, the second run refuses by name, no working folder is left under cache_root.
+- the other side of the check: a pool with another file at one QP is a stop recorded in the run file, no
+  estimate and nothing coded after it (VTM replaced by a stub).
 """
 
 import importlib.util
@@ -91,6 +93,22 @@ def test_estimate_by_hand_with_median_not_mean(e4):
     h1, h4 = hand_hours(rows, 3.5)
     assert got["hours_1_process"] == pytest.approx(h1, rel=1e-12) and got["hours_4_processes"] == pytest.approx(h4, rel=1e-12)
     assert got["terms"]["vtm"]["t_f_median_s"] == 2.0 and 0 < got["vtm_share"] < 1
+
+
+def test_pool_differing_from_sequential_is_a_recorded_stop(e4, tmp_path, monkeypatch):
+    def fake_set(paths, size, image, qps, work, workers):  # the pool gives another file at the last QP
+        rows = [{"param": q, "status": "valid", "seconds": 1.0, "file_bytes": 100, "bitstream_sha256": "s",
+                 "file_sha256": f"{q}-{workers if q == qps[-1] else 1}", "image": size, "codec": "vtm", "mode": workers,
+                 "set_wall_seconds": 2.0, "cpu_busy_share": None, "cr_file": 1.0} for q in qps]
+        return rows, 2.0
+    monkeypatch.setattr(e4, "vtm_set", fake_set)
+    plan = {"vtm": {"f": (32, 42), "m": (32, 42)}, "metric_repeats": 1, "mosaic_shape": (8, 8)}
+    images = {"f": np.zeros((8, 8), np.uint8), "m": np.zeros((8, 8), np.uint8)}
+    run_path, _ = e4.run({"cache_root": tmp_path}, images, plan, tmp_path / "out", {"core_commit": "t", "core_tree": "t"})
+    record = json.loads(run_path.read_text(encoding="utf-8"))
+    assert record["pool_equals_sequential"] is False and record["estimate"] is None
+    assert record["stopped"].startswith("VTM (f): pool differs from the sequential run in 1 of 2 QP: ['QP 42']")
+    assert {r["codec"] for r in record["rows"]} == {"vtm"}  # nothing after the stop
 
 
 @pytest.fixture(scope="module")
