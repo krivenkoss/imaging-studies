@@ -8,8 +8,8 @@ table beside it, which the run must not read. VTM is a substitute coder with a g
 - refinement: the crossing found (3 QP between the right nodes), no crossing both ways with the right reason,
   a non-monotone curve takes the first crossing from the high-quality side;
 - the run: rows per image (19 grid + 3 refinement), whole images before fragments, slow first;
-- resume after a stop between the grid and the refinement: every refinement runs once, rows equal an
-  uninterrupted run;
+- resume after a stop between the grid and the refinement and after one in the middle of the refinement:
+  every refinement runs once, rows equal an uninterrupted run;
 - privacy: no invented name and no pixel array in the run file and the book;
 - --plan equals a count by hand; missing registry, grid or copy refused in words.
 """
@@ -163,12 +163,14 @@ def test_resume_between_grid_and_refinement_refines_once(e4, setup, tmp_path):
         run(e4, setup, out, stop_after=2 * (19 + 3))  # the last task of the whole-image stage, before any refinement
     entries = [json.loads(line) for line in (out / e4.JOURNAL_FILE).read_text(encoding="utf-8").splitlines()[1:]]
     assert not any(r.get("phase") == "refine" for e in entries for r in e["rows"])
+    with pytest.raises(e4.RunStopped):
+        run(e4, setup, out, stop_after=3)  # in the middle of the refinement: 3 of its 6 tasks done
     resumed, _ = run(e4, setup, out)
     entries = [json.loads(line) for line in (out / e4.JOURNAL_FILE).read_text(encoding="utf-8").splitlines()[1:]]
     refine_tasks = [e["task"] for e in entries if any(r.get("phase") == "refine" for r in e["rows"])]
     assert len(refine_tasks) == len(set(refine_tasks)) == 6
     record_r, rows_r = keyed(resumed)
-    assert rows_r == keyed(whole)[1] and record_r["resumed_tasks"] == 2 * (19 + 3)
+    assert rows_r == keyed(whole)[1] and record_r["resumed_tasks"] == 2 * (19 + 3) + 3
     assert len(record_r["rows"]) == len({r["key"] for r in record_r["rows"]})
 
 
