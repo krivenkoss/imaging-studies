@@ -26,5 +26,18 @@
     "installed_to": "C:/Program Files/GPAC/ (owner, 2026-10-15)",
     "download": "nightly builds page https://gpac.io/downloads/gpac-nightly-builds/ (found by the assistant by search 2026-10-15, the page itself not opened); the link gpac_latest_head_win64.exe points to the latest build and changes - reproducibility rests on the kept installer and its SHA-256",
     "license": "LGPL v2.1+ (MP4Box -version: distributed under LGPL v2.1+)"
+  },
+  "pillow_heif": {
+    "name": "pillow-heif (Python bindings of libheif): AVIF through libheif, B12",
+    "kind": "wheel from PyPI, installed into a separate venv outside the project (key avif_libheif_python); not built by tools/build_coders.ps1",
+    "version": "0.22.0",
+    "wheel": "pillow_heif-0.22.0-cp313-cp313-win_amd64.whl",
+    "folder": "pillow-heif",
+    "url": "https://pypi.org/project/pillow-heif/0.22.0/",
+    "sha256": "bac5e9a4d85ffc724180eb0fa3aef304aa9b67faea6f86c33e4c2e6a447db098",
+    "contains": "libheif 1.19.7, aom 3.12.0 (encoder and decoder), libde265, x265 (pillow_heif.libheif_info() in the venv)",
+    "license": "METADATA License: BSD-3-Clause (the bindings); classifier and LICENSES_bundled.txt: binary wheels GPLv2 because of the bundled libraries (x265 GPLv2, libheif and libde265 LGPLv3, libaom BSD 3-Clause); LICENSES_bundled.txt names older versions (libheif 1.18.1, aom 3.6.1) than the ones in the wheel",
+    "deprecated": "AVIF marked deprecated in pillow-heif 0.22.0 and removed in 1.0.0 (CHANGELOG): the last version that encodes AVIF; no new builds - restoration from the kept wheel; the manylinux wheel carries aom 3.6.1 and gives other files (REFERENCE B12)",
+    "install": "pip install --require-hashes with the sha256 above, or the kept wheel; the venv of cycle 8 was compared file by file with the wheel (19 of 19 equal, 2026-10-21)"
   }
 }

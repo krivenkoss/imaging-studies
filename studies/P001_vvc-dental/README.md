@@ -23,7 +23,7 @@ The refutation is declared before the numbers: if, at the threshold, VVC does no
 | Images | Dental panoramic radiographs of the authors' institution, 8-bit grayscale; one image per patient |
 | Units of analysis | 512 × 512 fragments (threshold and codec comparison) and whole images (stored file size) |
 | Independent unit | patient; fragment results are summarised per image first |
-| Codecs | VTM (all-intra, 4:0:0, 10-bit internal, QP −12…63) · JPEG (libjpeg-turbo, QF 1–100) · HEIF (libheif + x265, q 0–100) · AVIF (libavif + libaom, 4:0:0, q 0–100) |
+| Codecs | VTM (all-intra, 4:0:0, 10-bit internal, QP −12…63) · JPEG (libjpeg-turbo, QF 1–100) · HEIF (libheif + x265, q 0–100) · AVIF (libheif + libaom through pillow-heif 0.22.0, the path of the group's earlier papers; monochrome, q 0–100) |
 | Metrics | PSNR, PSNR-HVS-M, HaarPSI — reference implementations |
 | Thresholds | PSNR-HVS-M = 42 dB (main); 40 and 41 dB (sensitivity) |
 | CR | 8·W·H / file size in bits, container included; bpp reported alongside |
