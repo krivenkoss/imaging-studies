@@ -469,3 +469,187 @@ def check_book(run_path, book_path, describe, refusal):
         extra = {(sheet, x.row, x.column) for row in book[sheet].iter_rows() for x in row if x.value is not None}
         if extra - set(cells):
             raise refusal(f"book sheet {sheet} has cells not taken from the run file: {sorted(extra - set(cells))[:3]}")
+
+
+# ---------------------------------------------------------------- the engine shared by E4 (moved from run_e4_dry.py;
+# run_e4_dry.py keeps its own copies as the record of cycle 11)
+
+LEVEL_VTM, FRAME_RATE_VTM = "5", 1  # B05
+
+
+def jsonable(obj):
+    """Non-finite floats as the strings '+inf', '-inf', 'nan' (as json_number), recursively."""
+    import math
+
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else ("+inf" if obj > 0 else ("-inf" if obj < 0 else "nan"))
+    if isinstance(obj, dict):
+        return {k: jsonable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [jsonable(v) for v in obj]
+    return obj
+
+
+def measure(original, recon):
+    """PSNR, PSNR-HVS-M, HaarPSI (B02-B04) against the original 8-bit image and their seconds."""
+    import time
+
+    from imstudies.core import metrics
+
+    t0 = time.perf_counter()
+    out = {"psnr_db": metrics.psnr(original, recon, max_pixels=original.size).value,
+           "psnr_hvs_m_db": metrics.psnr_hvs_m(original, recon, max_pixels=original.size).value,
+           "haarpsi": metrics.haarpsi(original, recon, max_pixels=original.size).value}
+    out["seconds_metrics"] = time.perf_counter() - t0
+    return out
+
+
+def make_row(unit, level, codec, param, image, file, recon, seconds, **extra):
+    """One file: size, CR by file, bpp, metrics, sha256 of the file and of the decoding; lossless if recon = image."""
+    h, w = image.shape
+    row = {"key": f"{unit}|{codec}|{param}", "unit": unit, "level": level, "codec": codec, "param": param,
+           "file_bytes": len(file), "cr_file": h * w / len(file), "bpp": 8 * len(file) / (h * w), "seconds": seconds,
+           "file_sha256": hashlib.sha256(file).hexdigest(),
+           "recon_sha256": hashlib.sha256(np.ascontiguousarray(recon).tobytes()).hexdigest(), "detail": None, **extra}
+    row |= measure(image, recon)
+    row["status"] = "lossless" if np.array_equal(image, recon) else "valid"
+    return jsonable(row)
+
+
+def error_row(unit, level, codec, param, exc, **extra):
+    return {"key": f"{unit}|{codec}|{param}", "unit": unit, "level": level, "codec": codec, "param": param,
+            "status": "error", "detail": f"{type(exc).__name__}: {str(exc)[:400]}", "file_bytes": None, "cr_file": None,
+            "bpp": None, "psnr_db": None, "psnr_hvs_m_db": None, "haarpsi": None, "seconds": None,
+            "seconds_metrics": None, "file_sha256": None, "recon_sha256": None, **extra}
+
+
+def vtm_task(paths, unit, level, image, qp, work, timeout_s):
+    """B05 then B09 for one QP; a failure is an error row."""
+    import time
+
+    from imstudies.lab.coders import vtm, vvc_heif
+
+    try:
+        t0 = time.perf_counter()
+        coded = vtm.encode_decode(image, qp, max_pixels=image.size, level=LEVEL_VTM, frame_rate=FRAME_RATE_VTM,
+                                  timeout_s=timeout_s, encoder=paths["encoder"], decoder=paths["decoder"],
+                                  cfg=paths["cfg"], work_root=work)
+        t1 = time.perf_counter()
+        packed = vvc_heif.pack(coded.bitstream, coded.recon, timeout_s=timeout_s, mp4box=paths["mp4box"],
+                               gpac=paths["gpac"], decoder=paths["decoder"], work_root=work)
+        t2 = time.perf_counter()
+        return make_row(unit, level, "vtm", qp, image, packed.file, coded.recon, t2 - t0, seconds_b05=t1 - t0,
+                        seconds_b09=t2 - t1, bitstream_sha256=hashlib.sha256(coded.bitstream).hexdigest())
+    except Exception as exc:  # noqa: BLE001 - status `error`, the run goes on
+        return error_row(unit, level, "vtm", qp, exc)
+
+
+def still_rows(paths, unit, level, image, codec, values, work, timeout_s):
+    """JPEG, HEIF (one call per value) or AVIF (B12, one batch call) at every value; failures are error rows."""
+    import time
+
+    from imstudies.lab.coders import avif_libheif, heif, jpeg
+
+    if codec == "avif":
+        try:
+            t0 = time.perf_counter()
+            coded = avif_libheif.encode_decode(image, list(values), max_pixels=image.size, timeout_s=timeout_s,
+                                               python=paths["avif_libheif_python"], work_root=work)
+            each = (time.perf_counter() - t0) / len(values)
+            return [make_row(unit, level, "avif", q, image, c.file, c.recon, each) for q, c in zip(values, coded)]
+        except Exception as exc:  # noqa: BLE001
+            return [error_row(unit, level, "avif", q, exc) for q in values]
+    module = {"jpeg": jpeg, "heif": heif}[codec]
+    rows = []
+    for q in values:
+        try:
+            t0 = time.perf_counter()
+            c = module.encode_decode(image, q, max_pixels=image.size)
+            rows.append(make_row(unit, level, codec, q, image, c.file, c.recon, time.perf_counter() - t0))
+        except Exception as exc:  # noqa: BLE001
+            rows.append(error_row(unit, level, codec, q, exc))
+    return rows
+
+
+class MemoryProbe:
+    """RSS of this process and all children every 0.5 s: peak total and peak of one EncoderApp, bytes."""
+
+    def __init__(self):
+        self.peak_total = self.peak_encoder = 0
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+
+    def _loop(self):
+        try:
+            import psutil
+        except ImportError:
+            return
+        me = psutil.Process(os.getpid())
+        while not self._stop.is_set():
+            total = 0
+            try:
+                procs = [me, *me.children(recursive=True)]
+            except psutil.Error:
+                procs = [me]
+            for p in procs:
+                try:
+                    rss = p.memory_info().rss
+                    total += rss
+                    if p.name().lower().startswith("encoderapp"):
+                        self.peak_encoder = max(self.peak_encoder, rss)
+                except psutil.Error:
+                    continue
+            self.peak_total = max(self.peak_total, total)
+            self._stop.wait(0.5)
+
+    def __enter__(self):
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc):
+        self._stop.set()
+        self._thread.join()
+
+
+def interp(points, x):
+    """Linear interpolation of sorted (x, y) points; outside them the nearest end value."""
+    if x <= points[0][0]:
+        return points[0][1]
+    if x >= points[-1][0]:
+        return points[-1][1]
+    for (x1, y1), (x2, y2) in zip(points, points[1:]):
+        if x1 <= x <= x2:
+            return y1 + (y2 - y1) * (x - x1) / (x2 - x1)
+    raise ValueError(x)
+
+
+def refinement(grid, threshold=42.0, step=4):
+    """Refinement QPs of a whole image after its grid (STUDY.md sections 5-7): the first crossing of PSNR-HVS-M =
+    threshold from the high-quality side (low QP) between nodes a and a + step gives QP a + 1 ... a + step - 1.
+    `grid` - (QP, PSNR-HVS-M) of the nodes, '+inf' for lossless. Returns (qps, None) or ([], reason)."""
+    import math
+
+    pts = sorted((q, math.inf if v == "+inf" else float(v)) for q, v in grid)
+    for (a, va), (b, vb) in zip(pts, pts[1:]):
+        if va >= threshold > vb:
+            if b - a != step:
+                raise ValueError(f"grid nodes {a} and {b} are not {step} apart")
+            return list(range(a + 1, b)), None
+    if all(v >= threshold for _, v in pts):
+        return [], f"no_crossing: every node is at or above {threshold:g} dB"
+    if all(v < threshold for _, v in pts):
+        return [], f"no_crossing: every node is below {threshold:g} dB"
+    return [], f"no_crossing: no fall below {threshold:g} dB from the high-quality side"
+
+
+def machine():
+    import platform
+
+    out = {"processor": platform.processor(), "logical_cpus": os.cpu_count(), "platform": platform.platform()}
+    try:
+        import psutil
+        out |= {"physical_cpus": psutil.cpu_count(logical=False),
+                "memory_total_gib": round(psutil.virtual_memory().total / 2 ** 30, 1)}
+    except ImportError:
+        pass
+    return out
