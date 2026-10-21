@@ -6,6 +6,6 @@ authors:
     given-names: "S. S."
     affiliation: "National Aerospace University, Department of Information and Communication Technologies"
     website: "https://dict.khai.edu/"
-version: "0.7.0"
+version: "0.7.1"
 license: MIT
 repository-code: "https://github.com/krivenkoss/imaging-studies"
