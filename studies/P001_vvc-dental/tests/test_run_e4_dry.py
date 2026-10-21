@@ -7,7 +7,8 @@
   other codecs; lab_paths.json with the coders needed): a run stopped twice by the test stop (in the path control
   and in the pool) and continued by the same call gives the rows of an uninterrupted run (file sha256 and metric
   values); another plan on the same journal is refused in words; the final file refuses the next run by name;
-  pool rows are ordered slow first.
+  pool rows are ordered slow first; a task that failed before a stop (an injected failure, as a Ctrl+C that
+  reaches the coder) runs again on resume, and the run equals the uninterrupted one.
 """
 
 import importlib.util
@@ -150,3 +151,24 @@ def test_resume_after_stops_equals_an_uninterrupted_run(dry, setup, tmp_path):
     pool = sorted((r for r in record_w["rows"] if r.get("phase") == "pool f"), key=lambda r: r["order"])
     times = [dry.expected_seconds(cycle10, "f", r["param"]) for r in pool]
     assert times == sorted(times, reverse=True) and len(pool) == 3
+
+
+def test_failed_task_before_a_stop_runs_again(dry, setup, tmp_path, monkeypatch):
+    paths, units, cycle10 = setup
+    whole, _ = dry.run(paths, units, PLAN, tmp_path / "whole", STATE, cycle10, log=lambda *a: None)
+    real = dry.vtm_task
+
+    def cut(paths_, unit, level, image, qp, work):  # the coder of this task is killed by the stop
+        if (unit, qp) == ("frisco", 50):
+            return dry.error_row(unit, level, "vtm", qp, RuntimeError("EncoderApp ended by the stop"))
+        return real(paths_, unit, level, image, qp, work)
+
+    monkeypatch.setattr(dry, "vtm_task", cut)
+    out = tmp_path / "cut"
+    with pytest.raises(dry.RunStopped):
+        dry.run(paths, units, PLAN, out, STATE, cycle10, stop_after=17 + 3, log=lambda *a: None)  # path + pool (f)
+    monkeypatch.setattr(dry, "vtm_task", real)
+    resumed, _ = dry.run(paths, units, PLAN, out, STATE, cycle10, log=lambda *a: None)
+    record_r, rows_r = rows_of(resumed)
+    assert record_r["retried_tasks"] == 1 and rows_r["frisco|vtm|50"][0] == "valid"
+    assert rows_r == rows_of(whole)[1]

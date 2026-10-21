@@ -77,8 +77,9 @@ DECLARED = {
                "наибольшая RSS одного EncoderApp на (ф) и (м), ГиБ."),
     "resume": ("Журнал e4_dry.partial.jsonl: первая строка — объявленное, план, коммит, версии кодеков, sha256 пикселей; далее "
                "строка на законченную задачу. Повтор той же командой: шапка совпала — готовые задачи не пересчитываются; "
-               "иначе — отказ словами. Строку незаконченной (прерванной) задачи журнал не получает. Сбой вызова — строка "
-               "error с причиной, прогон идёт дальше. k — по сессиям пула, дошедшим до конца."),
+               "иначе — отказ словами. Сбой вызова — строка error с причиной, прогон идёт дальше; задача, все строки "
+               "которой — error (в том числе оборванная остановкой: Ctrl+C доходит и до кодера), при повторном запуске "
+               "выполняется снова, в файл прогона идёт её последняя запись. k — по сессиям пула, дошедшим до конца."),
     "estimate": ("Оценка E4 (1 и 4 процесса; k = Σ секунд вызовов VTM пула (ф) / стена пула (ф)). Фрагменты: 154 · Σ по "
                  "значениям медианы по шести единицам секунд вызова — для каждого кодека (у AVIF — стена пакета / число "
                  "значений); метрики — 154 · Σn · медиана по шести единицам медианы по их файлам суммы секунд трёх метрик. "
@@ -472,6 +473,7 @@ def summary_lines(record):
               ("Память: один EncoderApp (м), наибольшая RSS, ГиБ", s["memory"]["m"]["peak_encoder_gib"]),
               ("Контроль детерминизма", json.dumps(s["determinism"], ensure_ascii=False)),
               ("Продолжение: задач взято из журнала в последней сессии, шт", record["resumed_tasks"]),
+              ("Продолжение: задач со сбоем, выполненных снова в последней сессии, шт", record["retried_tasks"]),
               ("Продолжение: оборванных строк журнала, шт", record["torn_lines"])]
     if e:
         lines += [("QP пересечения PSNR-HVS-M = 42 дБ на мозаике", e["crossing_qp"]),
@@ -537,7 +539,8 @@ def run(paths, units, plan, out_dir, state, cycle10, stop_after=None, log=print)
     log(f"{COMMAND}\n{QUESTION}\nDeclared before the numbers:")
     for key, text in DECLARED.items():
         log(f"  [{key}] {text}")
-    log(f"  journal: {journal.resumed} finished tasks taken over, {journal.torn_lines} torn lines ignored")
+    log(f"  journal: {journal.resumed} finished tasks taken over, {journal.to_retry} failed tasks to run again, "
+        f"{journal.torn_lines} torn lines ignored")
     runner = Runner(paths, units, plan, journal, work, cycle10, stop_after, log)
     try:
         runner.path_control()
@@ -550,11 +553,11 @@ def run(paths, units, plan, out_dir, state, cycle10, stop_after=None, log=print)
     finally:
         shutil.rmtree(work, ignore_errors=True)
     rows, controls_rows = [], []
-    for entry in journal.entries:
-        if entry["task"].startswith("control|"):
-            controls_rows += entry["rows"]
-        elif not entry["task"].startswith("pool|"):
-            rows += entry["rows"]
+    for task, task_rows in journal.last.items():  # the last entry of every task counts
+        if task.startswith("control|"):
+            controls_rows += task_rows
+        elif not task.startswith("pool|"):
+            rows += task_rows
     rows.sort(key=lambda r: (list(units).index(r["unit"]), e4_book.CODECS.index(r["codec"]), r["param"]))
     summary = summarise(rows, journal.entries, controls_rows, plan)
     stopped = None if all(d["equal"] for d in summary["determinism"]) else "determinism control: a file differs from the pool"
@@ -565,7 +568,8 @@ def run(paths, units, plan, out_dir, state, cycle10, stop_after=None, log=print)
         "wall_seconds": round(time.perf_counter() - t0, 1), **state, "declared_before_numbers": DECLARED, "plan": plan,
         "machine": machine(), "environment": {"python": platform.python_version(), "imstudies": imstudies.__version__,
                                               "numpy": np.__version__},
-        "header": journal.header, "resumed_tasks": journal.resumed, "torn_lines": journal.torn_lines,
+        "header": journal.header, "resumed_tasks": journal.resumed, "retried_tasks": journal.to_retry,
+        "torn_lines": journal.torn_lines,
         "units": {u: i["level"] for u, i in units.items()}, "stopped": stopped,
         "rows": rows, "controls": controls_rows, "summary": summary, "overview": e4_book.overview(rows),
     }

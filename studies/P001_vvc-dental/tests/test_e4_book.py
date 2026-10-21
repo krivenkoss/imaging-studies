@@ -5,7 +5,8 @@ built and read back; the tests check the sheets, 13 and 9 scatter charts with lo
 lists, series references inside the tables; the formulas of «Просмотр» and «Обзор» are evaluated by the
 test's own parser of their two templates for two units (and two levels, every metric) and compared with the
 record; «Обзор-данные» is recomputed by the test's own linear percentile, level by level; lossless points give
-no chart value and are counted. The journal: resume, torn line, another header refused.
+no chart value and are counted. The journal: resume, torn line, a failed task runs again (its last entry
+counts), another header refused.
 """
 
 import importlib.util
@@ -246,5 +247,12 @@ def test_journal_resume_torn_line_and_another_header(book_module, tmp_path):
     assert (j2.resumed, j2.torn_lines, sorted(j2.done)) == (2, 1, ["t1", "t2"])
     j2.append("t3", [{"k": 3}])
     assert sorted(book_module.Journal(path, header).done) == ["t1", "t2", "t3"]
+    j3 = book_module.Journal(path, header)
+    j3.append("t4", [{"k": 4, "status": "error"}])  # a failed call, or one cut by a stop
+    j4 = book_module.Journal(path, header)
+    assert "t4" not in j4.done and j4.last["t4"][0]["status"] == "error" and j4.to_retry == 1
+    j4.append("t4", [{"k": 4, "status": "valid"}])
+    j5 = book_module.Journal(path, header)
+    assert j5.done["t4"][0]["status"] == "valid" and j5.to_retry == 0 and j5.last["t4"] == j5.done["t4"]
     with pytest.raises(book_module.JournalRefusal, match=r"differs in \['plan'\] \{'plan': \['vtm'\]\}"):
         book_module.Journal(path, header | {"plan": {"vtm": [1, 2, 3]}})

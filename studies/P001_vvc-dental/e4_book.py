@@ -49,12 +49,13 @@ def _canonical(obj):
 class Journal:
     """Append-only journal: the first line is the header (declared, plan, commit, versions, images); then one line
     per finished task {"task": id, "rows": [...]}. A run started again with an equal header skips the finished
-    tasks; another header is refused in words naming what differs. A torn last line (a hard stop while writing)
-    is ignored and counted."""
+    tasks; another header is refused in words naming what differs. A task whose rows are all `error` (a failed
+    call, also one cut by a stop - Ctrl+C reaches the coder too) is not finished: it runs again, and its last
+    entry is the one that counts (`last`). A torn last line (a hard stop while writing) is ignored and counted."""
 
     def __init__(self, path, header):
         self.path, self.header, self.lock = Path(path), header, threading.Lock()
-        self.done, self.entries, self.torn_lines = {}, [], 0
+        self.done, self.last, self.entries, self.torn_lines = {}, {}, [], 0
         if self.path.is_file():
             lines = self.path.read_text(encoding="utf-8").split("\n")
             old = json.loads(lines[0])
@@ -73,7 +74,7 @@ class Journal:
                 except json.JSONDecodeError:
                     self.torn_lines += 1
                     continue
-                self.done[entry["task"]] = entry["rows"]
+                self.last[entry["task"]] = entry["rows"]
                 self.entries.append(entry)
             if self.torn_lines:  # rewrite without the torn line, so the next appends start on a fresh line
                 good = [lines[0]] + [ln for ln in lines[1:] if ln.strip() and _loads_ok(ln)]
@@ -82,7 +83,8 @@ class Journal:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             with open(self.path, "x", encoding="utf-8", newline="\n") as f:
                 f.write(_canonical(header) + "\n")
-        self.resumed = len(self.done)
+        self.done = {task: rows for task, rows in self.last.items() if not failed(rows)}
+        self.resumed, self.to_retry = len(self.done), len(self.last) - len(self.done)
 
     def append(self, task, rows, **extra):
         """One finished task: its rows (and extra fields, e.g. the wall time of a finished pool)."""
@@ -92,8 +94,17 @@ class Journal:
                 f.write(line + "\n")
                 f.flush()
                 os.fsync(f.fileno())
-            self.done[task] = rows
+            self.last[task] = rows
+            if failed(rows):
+                self.done.pop(task, None)
+            else:
+                self.done[task] = rows
             self.entries.append({"task": task, "rows": rows, **extra})
+
+
+def failed(rows):
+    """A task is not finished when it has rows and every one of them is an error."""
+    return bool(rows) and all(r.get("status") == "error" for r in rows)
 
 
 def _loads_ok(line):
