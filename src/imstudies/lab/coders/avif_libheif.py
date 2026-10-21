@@ -3,8 +3,9 @@
 Contract: ../REFERENCE.md#b12 (one level above this repository). For P001 it replaces B08 (AVIF of Pillow,
 libavif), which stays for the repetition of A05. The coding runs in the separate environment of the key
 avif_libheif_python of lab_paths.json: `python -I avif_libheif_exec.py <work dir>` through run_tool, files
-exchanged in a temporary folder under work_root and removed after the call. One call codes one image at one
-quality or at a list of qualities (one start of the environment). The aom parameters are libheif's own
+exchanged in a temporary folder under work_root and removed after the call; folders of work_root that the
+call itself created are removed after it when empty, so nothing is left under cache_root. One call codes one
+image at one quality or at a list of qualities (one start of the environment). The aom parameters are libheif's own
 defaults passed explicitly, the number of threads fixed: the file depends on it, and libheif's default is the
 number of cores of the machine. A file whose av1C is not monochrome is a failure.
 """
@@ -71,7 +72,22 @@ def encode_decode(image, quality, *, max_pixels, timeout_s, python, work_root):
     if not python.is_file():
         raise FileNotFoundError(f"the python of the B12 environment is not found: {python}")
     h, w = image.shape
+    created, folder = [], Path(work_root)  # folders this call creates: removed after it if empty, deepest first
+    while not folder.exists():
+        created.append(folder)
+        folder = folder.parent
     Path(work_root).mkdir(parents=True, exist_ok=True)
+    try:
+        return _code(image, quality, qualities, python, work_root, timeout_s, h, w)
+    finally:
+        for folder in created:
+            try:
+                folder.rmdir()
+            except OSError:
+                break
+
+
+def _code(image, quality, qualities, python, work_root, timeout_s, h, w):
     with tempfile.TemporaryDirectory(dir=work_root, prefix="avif_libheif_") as work:
         work = Path(work)
         np.save(work / "image.npy", np.ascontiguousarray(image))

@@ -5,7 +5,9 @@ Both sides of every decision: synthetic sizes 8 x 8, 21 x 13, 517 x 389, 512 x 5
 the shape kept; a repeated call gives the same sha256; a batch call equals single calls bit for bit; the six
 named refusals come before any call; no key or no file of the environment is refused in words; an executor
 reporting other versions is refused in words; an executor returning a colour AVIF (made by Pillow's own AVIF)
-is a failure. The substitute executors run under this test's python.
+is a failure. The substitute executors run under this test's python. No folder is left under cache_root after a
+call - neither the temporary one nor a work_root (and its parents) created by the call; an existing folder stays.
+Regression: five rows of Frisco of variant (d) of cycles/8/avif_diag.json bit for bit (file sha256, PSNR_tc).
 """
 
 import hashlib
@@ -40,7 +42,9 @@ def env():
     python = raw.get("avif_libheif_python")
     if not python or python.startswith("<") or not Path(python).is_file():
         pytest.skip("the B12 environment (avif_libheif_python) is not configured on this machine")
-    return {"python": python, "work_root": (CORE / raw["cache_root"]).resolve() / "work_tests_b12"}
+    cache_root = (CORE / raw["cache_root"]).resolve()
+    return {"python": python, "work_root": cache_root / "work_tests_b12", "cache_root": cache_root,
+            "images_root": (CORE / raw["images_root"]).resolve()}
 
 
 def call(b12, env, image, quality, **kw):
@@ -55,7 +59,7 @@ def test_monochrome_and_shape_kept(b12, env, shape):
     assert coded.recon.shape == image.shape and coded.recon.dtype == np.uint8
     assert coded.provenance["av1C_monochrome"] == 1 and coded.provenance["enc_params"] == b12.ENC_PARAMS
     assert coded.provenance["versions"] == b12.EXPECTED_VERSIONS
-    assert list(Path(env["work_root"]).iterdir()) == []  # the temporary folder is removed after the call
+    assert not Path(env["work_root"]).exists()  # created by the call, removed after it
 
 
 def test_repeat_and_batch_equal_single_calls(b12, env):
@@ -87,6 +91,39 @@ def test_named_refusals_before_any_call(b12, image, quality, kw, reason):
     with pytest.raises(Refusal) as info:
         b12.encode_decode(image, quality, **args)
     assert info.value.reason == reason
+
+
+def test_no_folder_left_under_cache_root(b12, env, tmp_path):
+    nested = env["cache_root"] / "work_tests_b12_nested" / "inner"
+    assert not nested.parent.exists()
+    b12.encode_decode(e0_crop(21, 13), [10, 90], max_pixels=273, timeout_s=120, python=env["python"], work_root=nested)
+    assert not nested.exists() and not nested.parent.exists()
+    b12.encode_decode(e0_crop(21, 13), 50, max_pixels=273, timeout_s=120, python=env["python"], work_root=tmp_path)
+    assert tmp_path.is_dir() and list(tmp_path.iterdir()) == []  # an existing folder stays, empty
+
+
+def test_regression_against_variant_d_of_cycle_8(b12, env):
+    import math
+
+    from imstudies.core.metrics import psnr
+    from imstudies.lab.images import load_test_images
+
+    run8 = env["cache_root"] / "cycles" / "8" / "avif_diag.json"
+    if not run8.is_file():
+        pytest.skip("the run file of cycle 8 is absent on this machine")
+    rows = {(r["sigma2"], r["seed"], r["qf"]): r for r in json.loads(run8.read_text(encoding="utf-8"))["rows"]
+            if r["variant"] == "d"}
+    (frisco,) = load_test_images(env["images_root"], ["frisco.bmp"], (512, 512))
+    true = frisco["array"]
+    noise = np.random.default_rng(1).normal(0, math.sqrt(100), true.shape)  # the noise of cycles 7 and 8
+    noisy = np.clip(np.rint(true.astype(np.float64) + noise), 0, 255).astype(np.uint8)
+    qualities = [0, 25, 50, 75, 100]
+    coded = b12.encode_decode(noisy, qualities, max_pixels=noisy.size, timeout_s=120, python=env["python"],
+                              work_root=env["work_root"])
+    for q, c in zip(qualities, coded):
+        ref = rows[100, 1, q]
+        assert hashlib.sha256(c.file).hexdigest() == ref["file_sha256"], q
+        assert psnr(true, c.recon, max_pixels=true.size).value == ref["psnr_tc_db"], q
 
 
 def test_environment_missing_is_refused_in_words(b12, tmp_path):
