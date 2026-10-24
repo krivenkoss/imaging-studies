@@ -14,7 +14,10 @@ from scipy.signal import convolve2d
 
 # Refusal reasons of the package: the flat list of ../REFERENCE.md#spec-result without
 # internal_error (status `error`, not a refusal). parameter_out_of_range is reachable in
-# imstudies.lab.coders.vtm (B05), the others in this module.
+# imstudies.lab.coders.vtm (B05); wrong_dtype, wrong_shape, too_small, input_too_large in
+# imstudies.core.complexity (B13); wrong_input, too_small, input_too_large, ties_or_zeros in
+# imstudies.core.paired (B14) - added with their contracts (owner decision 2026-10-24, cycle 15);
+# the others in this module.
 REFUSAL_REASONS = (
     "not_2d",
     "unsupported_dtype",
@@ -24,6 +27,12 @@ REFUSAL_REASONS = (
     "parameter_out_of_range",
     "image_too_large",
     "zero_weight_sum",
+    "wrong_dtype",
+    "wrong_shape",
+    "too_small",
+    "input_too_large",
+    "wrong_input",
+    "ties_or_zeros",
 )
 
 

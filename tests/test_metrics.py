@@ -345,9 +345,11 @@ def test_validation_order(name):
 
 
 def test_refusal_reasons_are_the_flat_list():
-    # ../REFERENCE.md#spec-result, flat list as of 2026-10-14 (parameter_out_of_range added with B05)
+    # ../REFERENCE.md#spec-result, flat list as of 2026-10-14 (parameter_out_of_range added with B05); the last six
+    # added with B13 and B14 (owner decision 2026-10-24, cycle 15)
     spec_result = ("not_2d", "unsupported_dtype", "shape_mismatch", "image_too_small", "parameter_not_assigned",
-                   "parameter_out_of_range", "image_too_large", "zero_weight_sum", "internal_error")
+                   "parameter_out_of_range", "image_too_large", "zero_weight_sum", "internal_error",
+                   "wrong_dtype", "wrong_shape", "too_small", "input_too_large", "wrong_input", "ties_or_zeros")
     assert REFUSAL_REASONS == tuple(r for r in spec_result if r != "internal_error")
     assert Refusal("not_2d").reason == "not_2d"
     with pytest.raises(ValueError):
