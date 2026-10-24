@@ -810,6 +810,8 @@ def main(argv=None):
                                                                 "cycle 13: no task, no coder, no pixel")
     parser.add_argument("--plan", action="store_true", help="print the plan from the registry and the grid; no pixels")
     parser.add_argument("--rebuild-book", action="store_true", help="rebuild the book from the existing run file")
+    parser.add_argument("--out", type=Path, help="with --rebuild-book: the book to write (default: beside the run file); "
+                                                 "an existing book is refused")
     args = parser.parse_args(argv)
     try:
         paths = load_paths()
@@ -817,8 +819,14 @@ def main(argv=None):
         if args.rebuild_book:
             if not (out_dir / RUN_FILE).is_file():
                 raise RunRefusal(f"no run file to rebuild the book from: {out_dir / RUN_FILE}")
-            build_book(out_dir / RUN_FILE, out_dir / BOOK_FILE)
-            print(f"Book rebuilt and checked cell by cell: {out_dir / BOOK_FILE}")
+            book = out_dir / BOOK_FILE
+            if args.out is not None:
+                book = args.out if args.out.is_absolute() else (Path.cwd() / args.out)
+                if book.exists():
+                    raise RunRefusal(f"{book} already exists: --out never overwrites a book")
+                book.parent.mkdir(parents=True, exist_ok=True)
+            build_book(out_dir / RUN_FILE, book)
+            print(f"Book rebuilt and checked cell by cell: {book}")
             return 0
         if args.hours is not None and not args.hours > 0:
             raise RunRefusal(f"--hours {args.hours:g}: a session needs a positive number of hours")

@@ -269,8 +269,9 @@ def book_cells(record, run_sha256, describe):
     cr_ranges = [f"${_col(c0 + 4)}${TABLE_ROW}:${_col(c0 + 4)}${TABLE_ROW + len(params) - 1}"
                  for c0, params in view_layout(rows).values()]
     cells["Просмотр", 4, 1], cells["Просмотр", 5, 1] = "Пороги PSNR-HVS-M: CR от", "CR до"
-    cells["Просмотр", 4, 2] = f"=MIN({','.join(cr_ranges)})"
-    cells["Просмотр", 5, 2] = f"=MAX({','.join(cr_ranges)})"
+    # AGGREGATE 5 / 4 (MIN / MAX), option 6 - skip errors: the NA of lossless and error points (Excel 2010+, LibreOffice)
+    cells["Просмотр", 4, 2] = f"=_xlfn.AGGREGATE(5,6,{','.join(cr_ranges)})"
+    cells["Просмотр", 5, 2] = f"=_xlfn.AGGREGATE(4,6,{','.join(cr_ranges)})"
     for k, t in enumerate(THRESHOLDS_DB):
         cells["Просмотр", 4, 3 + k], cells["Просмотр", 5, 3 + k] = t, t
     # «Обзор»

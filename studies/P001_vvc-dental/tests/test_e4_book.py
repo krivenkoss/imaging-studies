@@ -6,12 +6,17 @@ lists, series references inside the tables; the formulas of «Просмотр»
 test's own parser of their two templates for two units (and two levels, every metric) and compared with the
 record; «Обзор-данные» is recomputed by the test's own linear percentile, level by level; lossless points give
 no chart value and are counted. The journal: resume, torn line, a failed task runs again (its last entry
-counts), another header refused.
+counts), another header refused. Cycle 15: the abscissae of the threshold lines on «Просмотр» (B4:B5) skip the NA
+of lossless and error points - Excel itself recalculates the book (COM from PowerShell; skipped without Excel).
 """
 
+import base64
 import importlib.util
 import json
 import re
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -346,3 +351,57 @@ def test_two_series_alike_in_colour_and_line_are_refused(book_module, tmp_path):
     chart.series.append(book_module._series(ws, 1, 2, 1, 3, "HaarPSI", ("0072B2", "solid", "triangle")))
     with pytest.raises(book_module.StyleRefusal, match=r"chart 'Проба': series 'PSNR' and 'HaarPSI' coincide"):
         book_module.check_styles(chart)
+
+
+def excel_values(book_path, sheet_number, chosen, cells):
+    """Excel itself recalculates the book (COM from PowerShell - no Python package): `chosen` into B1 of the sheet
+    number `sheet_number`, full recalculation, the values of `cells` (a float, or 'ERR <text>' for an error). None
+    when this machine has no PowerShell or no Excel. The book is opened read only and closed unsaved."""
+    if sys.platform != "win32" or shutil.which("powershell") is None:
+        return None
+    q = lambda s: "'" + str(s).replace("'", "''") + "'"  # noqa: E731 - a PowerShell string
+    script = f"""
+$ErrorActionPreference = 'Stop'
+try {{ $x = New-Object -ComObject Excel.Application }} catch {{ 'NO-EXCEL'; exit 0 }}
+try {{
+  $x.Visible = $false; $x.DisplayAlerts = $false
+  $wb = $x.Workbooks.Open({q(book_path)}, 0, $true)
+  $ws = $wb.Worksheets.Item({sheet_number})
+  $ws.Range('B1').Value2 = {q(chosen)}
+  $x.CalculateFull()
+  foreach ($c in @({', '.join(q(c) for c in cells)})) {{
+    $v = $ws.Range($c).Value2
+    if ($v -is [double]) {{ '{{0}}|{{1}}' -f $c, $v.ToString('R', [Globalization.CultureInfo]::InvariantCulture) }}
+    else {{ '{{0}}|ERR {{1}}' -f $c, $ws.Range($c).Text }}
+  }}
+  $wb.Close($false)
+}} finally {{ $x.Quit(); [void][Runtime.InteropServices.Marshal]::ReleaseComObject($x) }}
+"""
+    out = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand",
+                          base64.b64encode(script.encode("utf-16-le")).decode()],
+                         capture_output=True, text=True, timeout=300)
+    if "NO-EXCEL" in out.stdout:
+        return None
+    assert out.returncode == 0, out.stderr
+    values = {}
+    for line in out.stdout.splitlines():
+        cell, sep, value = line.strip().partition("|")
+        if sep:
+            values[cell] = value if value.startswith("ERR") else float(value)
+    return values
+
+
+def test_threshold_abscissae_skip_na_points_recalculated_by_excel(book_module, built):
+    record, _, book_path, wb = built
+    view = wb["Просмотр"]
+    t = book_module.TABLE_ROW
+    ranges = ",".join(f"${book_module._col(c0 + 4)}${t}:${book_module._col(c0 + 4)}${t + len(params) - 1}"
+                      for c0, params in book_module.view_layout(record["rows"]).values())
+    assert (view["B4"].value, view["B5"].value) == (f"=_xlfn.AGGREGATE(5,6,{ranges})", f"=_xlfn.AGGREGATE(4,6,{ranges})")
+    mine = [r for r in record["rows"] if r["unit"] == "frisco"]
+    assert {r["status"] for r in mine} == {"valid", "lossless", "error"}  # the case of the defect: NA points present
+    valid = [r["cr_file"] for r in mine if r["status"] == "valid"]
+    got = excel_values(book_path, book_module.SHEETS.index("Просмотр") + 1, "frisco", ["B4", "B5"])
+    if got is None:
+        pytest.skip("no Excel on this machine: the recalculation of this test is done by Excel")
+    assert got["B4"] == pytest.approx(min(valid), rel=1e-15) and got["B5"] == pytest.approx(max(valid), rel=1e-15)
