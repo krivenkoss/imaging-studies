@@ -13,7 +13,9 @@ finished into the journal, the journal is copied to e4_main.partial.session-<k>.
 killed process loses only the started tasks. The output of a session is copied to e4_main.session-<k>.log, with a
 progress line every 10 min. The session that leaves no task unfinished writes <cache_root>/cycles/<CYCLE>/e4_main.json
 once and the book e4_main.xlsx (e4_book.py). Only codes - no file names, no pixels - leave the run. `--status` and
-`--plan` read the journal, the registry and the grid only.
+`--plan` read the journal, the registry and the grid only. `--assemble` (STUDY.md section 7, «Сборка из журнала»;
+cycle 14) writes the run file and the book from the journal of cycle 13 (pinned sha256) when a task failed at every
+attempt: no task is run, no coder called, no pixel read; such a task gives its error rows with the number of attempts.
 """
 
 import argparse
@@ -58,6 +60,11 @@ INCOMPLETE = "grid incomplete: a node is missing or failed - waits for the next 
 REGISTRY_SHA256 = "03affc6c150cb3f5beaf2a6c99c1f55861aa877666d77a9e20cc382e30d8f949"  # data/registry/P001.json, cycle 8
 TILES_SHA256 = "aad8e80ccb5b972ef3ce7d9f22225f34c15e56ce08dc0247efbdf0af8fcc10a1"  # cycles/9/p001_tiles.json
 CYCLE11_SHA256 = "a0365d9766cae3813d56b7a0c2f822cb9fce4c8bb11a4e11a37c0d3bf16979d9"  # cycles/11/e4_dry.json
+JOURNAL13_SHA256 = "4af635e950df1040171920edeb6eb07bad4e76a2a1991fa332e3bf911ad1ece5"  # cycles/13 journal after session 7
+ASSEMBLED = "собран из журнала: незаконченных задач {n}"
+SESSION_END_RU = {"stopped by plan (deadline)": "остановлена по сроку", "stopped by plan (flag)": "остановлена флагом",
+                  "ended with tasks left": "закончена, остались задачи", "finished the run": "закончила прогон",
+                  "cut off": "оборвана — записи конца нет"}
 TIMEOUT_S = {"f": 600, "m": 3600}
 POOL = 4
 FULL_PLAN = {
@@ -125,9 +132,9 @@ def load_paths():
     return paths
 
 
-def load_inputs(data_root, tiles_path, pins=(REGISTRY_SHA256, TILES_SHA256)):
-    """Registry and grid (metadata only): pinned sha256, every copy present, tiles inside their image and as many as
-    the registry says. No pixel is read here."""
+def load_inputs(data_root, tiles_path, pins=(REGISTRY_SHA256, TILES_SHA256), copies=True):
+    """Registry and grid (metadata only): pinned sha256, every copy present (unless `copies` is false - the assembly
+    does not touch data/P001), tiles inside their image and as many as the registry says. No pixel is read here."""
     data_root, tiles_path = Path(data_root), Path(tiles_path)
     registry_path = data_root / "registry" / "P001.json"
     for what, path, pin in (("the registry data/registry/P001.json", registry_path, pins[0]),
@@ -142,7 +149,7 @@ def load_inputs(data_root, tiles_path, pins=(REGISTRY_SHA256, TILES_SHA256)):
     tile = tiles.get("parameters", {}).get("tile", 512)
     by_code = {e["code"]: e for e in registry["images"]}
     for code, entry in by_code.items():
-        if not (data_root / "P001" / f"{code}.png").is_file():
+        if copies and not (data_root / "P001" / f"{code}.png").is_file():
             raise RunRefusal(f"{code}: the copy data/P001/{code}.png does not exist")
         mine = [r for r in rows if r["code"] == code]
         if len(mine) != entry["full_tiles"]:
@@ -491,10 +498,19 @@ def summary_lines(record):
         wall = x["wall_s"] if x["wall_s"] is not None else x["last_progress_wall_s"]
         lines.append((f"Сессия {x['session']}: начата, UTC; конец; стена, ч; взято из журнала, задач; записано задач; "
                       "доведено после сигнала остановки",
-                      f"{x['started_utc']}; {x['end']}; {'—' if wall is None else f'{wall / 3600:.2f}'}"
-                      f"{'' if x['wall_s'] is not None else ' (не меньше)'}; {x['taken_from_journal']}; "
-                      f"{x['recorded_tasks']}; {'—' if x['finished_after_signal'] is None else x['finished_after_signal']}"))
-    lines += [("Стена прогона (эта сессия), с", record["wall_seconds"]),
+                      f"{x['started_utc']}; {SESSION_END_RU.get(x['end'], x['end'])}; "
+                      f"{'—' if wall is None else f'{wall / 3600:.2f}'}"
+                      f"{'' if x['wall_s'] is not None else ' (не меньше: до последней строки прогресса)'}; "
+                      f"{x['taken_from_journal']}; {x['recorded_tasks']}; "
+                      f"{'—' if x['finished_after_signal'] is None else x['finished_after_signal']}"))
+    a = record.get("assembled")
+    if a:
+        lines += [("Собран из журнала", a["line"]),
+                  ("Журнал: sha256; байт; оборванных строк", f"{a['journal_sha256']}; {a['journal_bytes']}; {a['torn_lines']}"),
+                  ("Коммит журнала; коммит сборки", f"{a['journal_commit']}; {a['assembly_commit']}"),
+                  *((f"Незаконченная задача {u['task']}: попыток, шт; причина последней попытки",
+                     f"{u['attempts']}; {u['detail']}") for u in a["unfinished"])]
+    lines += [("Стена прогона по сессиям (сумма), с" if a else "Стена прогона (эта сессия), с", record["wall_seconds"]),
               ("Стена этапа «снимки» по сессиям, с", json.dumps(s["pool_walls"]["whole"])),
               ("Стена этапа «фрагменты» по сессиям, с", json.dumps(s["pool_walls"]["fragments"])),
               ("Ускорение пула k, раз", s["k"]),
@@ -502,8 +518,10 @@ def summary_lines(record):
               ("Память: этап «фрагменты», наибольшая сумма RSS, ГиБ", s["memory"]["fragments"]["peak_pool_gib"]),
               ("Память: один EncoderApp, снимки, ГиБ", s["memory"]["whole"]["peak_encoder_gib"]),
               ("Память: один EncoderApp, фрагменты, ГиБ", s["memory"]["fragments"]["peak_encoder_gib"]),
-              ("Контроль детерминизма", json.dumps(s["determinism"], ensure_ascii=False)),
-              ("Продолжение: задач взято из журнала (эта сессия), шт", record["resumed_tasks"]),
+              ("Контроль детерминизма", json.dumps(s["determinism"], ensure_ascii=False))]
+    if a:
+        return lines
+    lines += [("Продолжение: задач взято из журнала (эта сессия), шт", record["resumed_tasks"]),
               ("Продолжение: задач со сбоем, выполненных снова (эта сессия), шт", record["retried_tasks"]),
               ("Повтор сразу после сбоя (эта сессия), задач, шт", record["retried_in_session"]),
               ("Продолжение: оборванных строк журнала, шт", record["torn_lines"])]
@@ -511,8 +529,12 @@ def summary_lines(record):
 
 
 def describe(record):
+    a = record.get("assembled")
+    built = [("Собран из журнала", f"{a['line']}; {a['utc']}; команда {a['command']}"),
+             ("Журнал, sha256", a["journal_sha256"]),
+             ("Коммит и дерево сборки", f"{a['assembly_commit']}; {a['assembly_tree']}")] if a else []
     return [("Начат, UTC", record["started_utc"]), ("Закончен, UTC", record["finished_utc"]),
-            ("Коммит core", record["core_commit"]), ("Дерево core", record["core_tree"]),
+            ("Коммит core", record["core_commit"]), ("Дерево core", record["core_tree"]), *built,
             *((f"{k} (до чисел)", v) for k, v in record["declared_before_numbers"].items()),
             ("Машина", json.dumps(record["machine"], ensure_ascii=False)),
             ("Где что", "«Просмотр» — единица в B1 (список: снимки D01…, фрагменты DNN_rRR_cCC); «Обзор» — уровень в B1 и "
@@ -671,6 +693,72 @@ def status(out_dir, levels, plan, timing, now=None, log=print):
     return state
 
 
+def assemble(out_dir, levels, timing, state, journal_sha256=JOURNAL13_SHA256, log=print):
+    """The run file and the book from the journal (STUDY.md section 7, «Сборка из журнала»): no task is run, no coder
+    called, no pixel read. Every task gives its last entry, as the header of the journal declares; a task that failed
+    at every attempt gives its error rows with the cause of its last attempt and the number of attempts. A task that
+    never ran or a grid not finished is refused - the assembly closes failures, not an unfinished run. The journal
+    may come from another commit: both commits go into the file. Returns (run file, book)."""
+    out_dir = Path(out_dir)
+    run_path, book_path, journal_path = out_dir / RUN_FILE, out_dir / BOOK_FILE, out_dir / JOURNAL_FILE
+    if run_path.exists():
+        raise RunRefusal(f"{run_path} already exists: a run file of E4 is never overwritten")
+    if not journal_path.is_file():
+        raise RunRefusal(f"no journal {journal_path} to assemble from")
+    sha = sha256_file(journal_path)
+    if sha != journal_sha256:
+        raise RunRefusal(f"the journal {JOURNAL_FILE} has sha256 {sha}, the assembly is declared for {journal_sha256}")
+    header, entries, torn = e4_book.read_journal(journal_path)
+    plan, last, attempts = header["plan"], {}, collections.Counter()
+    for e in entries:
+        last[e["task"]] = e["rows"]
+        if entry_kind(e["task"]) in ("task", "control"):
+            attempts[e["task"]] += 1
+    missing, incomplete = unfinished(levels, plan, timing, last)
+    never = [t for t in missing if t not in last]
+    if never or incomplete:
+        raise RunRefusal(f"the journal is not a finished run: {len(never)} tasks never ran, grids of {incomplete} not "
+                         f"finished - continue it with {COMMAND}; the assembly closes only tasks that failed every time")
+    rows, controls_rows = [], []
+    for task, task_rows in last.items():
+        kind = entry_kind(task)
+        if kind == "control":
+            controls_rows += task_rows
+        elif kind == "task":
+            rows += [r | {"attempts": attempts[task]} for r in task_rows] if task in missing else task_rows
+    order = list(levels)
+    rows.sort(key=lambda r: (order.index(r["unit"]), e4_book.CODECS.index(r["codec"]), r["param"]))
+    table = sessions(entries)
+    ends = [e["utc"] for e in entries if entry_kind(e["task"]) == "session" and e["task"].endswith("|end")]
+    wall = sum(x["wall_s"] if x["wall_s"] is not None else (x["last_progress_wall_s"] or 0.0) for x in table)
+    record = {
+        "run": RUN_FILE, "study": "P001", "cycle": CYCLE, "question": QUESTION, "command": COMMAND,
+        "assembled": {"line": ASSEMBLED.format(n=len(missing)), "command": f"{COMMAND} --assemble", "utc": utc_now(),
+                      "journal": JOURNAL_FILE, "journal_sha256": sha, "journal_bytes": journal_path.stat().st_size,
+                      "torn_lines": torn, "journal_commit": header["core_commit"], "journal_tree": header["core_tree"],
+                      "assembly_commit": state["core_commit"], "assembly_tree": state["core_tree"],
+                      "unfinished": [{"task": t, "attempts": attempts[t], "detail": last[t][0]["detail"]}
+                                     for t in missing]},
+        "started_utc": table[0]["started_utc"] if table else None, "finished_utc": ends[-1] if ends else None,
+        "wall_seconds": round(wall, 1), "core_commit": header["core_commit"], "core_tree": header["core_tree"],
+        "declared_before_numbers": header["declared"], "plan": plan, "machine": e4_book.machine(),
+        "environment": {"python": platform.python_version(), "imstudies": imstudies.__version__, "numpy": np.__version__},
+        "header": header, "units": dict(levels), "rows": rows, "controls": controls_rows,
+        "summary": summarise(rows, entries, controls_rows, refinements(levels, plan, last)),
+        "overview": e4_book.overview(rows),
+    }
+    record["summary_lines"] = summary_lines(record)
+    text = json.dumps(e4_book.jsonable(record), ensure_ascii=False, indent=1, allow_nan=False)
+    with open(run_path, "x", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+    build_book(run_path, book_path)
+    for label, value in record["summary_lines"]:
+        log(f"  {label}: {value}")
+    log(f"{record['assembled']['line']}\nRun file: {run_path} (sha256 {sha256_file(run_path)})\n"
+        f"Book: {book_path} (sha256 {sha256_file(book_path)}), checked cell by cell")
+    return run_path, book_path
+
+
 def plan_counts(registry, tile_rows, plan, timing):
     """The plan from metadata (LAB-EXPERIMENT, chain, 6): per image fragments and tasks; tasks and files per codec;
     expected hours for 1 and for 4 processes (times of cycle 11, A09; refinement at the QP of the dry run)."""
@@ -718,6 +806,8 @@ def main(argv=None):
     parser.add_argument("--hours", type=float, help="a session of H hours: then no new task is given, the started ones "
                                                     "are finished; the same command continues")
     parser.add_argument("--status", action="store_true", help="progress from the journal; runs no task")
+    parser.add_argument("--assemble", action="store_true", help="write the run file and the book from the journal of "
+                                                                "cycle 13: no task, no coder, no pixel")
     parser.add_argument("--plan", action="store_true", help="print the plan from the registry and the grid; no pixels")
     parser.add_argument("--rebuild-book", action="store_true", help="rebuild the book from the existing run file")
     args = parser.parse_args(argv)
@@ -733,7 +823,7 @@ def main(argv=None):
         if args.hours is not None and not args.hours > 0:
             raise RunRefusal(f"--hours {args.hours:g}: a session needs a positive number of hours")
         tiles_path = paths["cache_root"] / "cycles" / "9" / "p001_tiles.json"
-        registry, tile_rows, tile = load_inputs(paths["data_root"], tiles_path)
+        registry, tile_rows, tile = load_inputs(paths["data_root"], tiles_path, copies=not args.assemble)
         cycle11_path = paths["cache_root"] / "cycles" / "11" / "e4_dry.json"
         if sha256_file(cycle11_path) != CYCLE11_SHA256:
             raise RunRefusal(f"{cycle11_path.name}: sha256 differs from the pinned {CYCLE11_SHA256}")
@@ -745,6 +835,9 @@ def main(argv=None):
             return 0
         if args.status:
             status(out_dir, unit_levels(registry, tile_rows), FULL_PLAN, timing)
+            return 0
+        if args.assemble:
+            assemble(out_dir, unit_levels(registry, tile_rows), timing, git_state(ROOT))
             return 0
         if (out_dir / RUN_FILE).exists():
             raise RunRefusal(f"{out_dir / RUN_FILE} already exists: a run file of E4 is never overwritten")

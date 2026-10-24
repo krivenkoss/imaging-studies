@@ -14,6 +14,7 @@ the charts. Shared lab code lives here until a second study needs it (then src/,
 import hashlib
 import json
 import os
+import subprocess
 import threading
 from pathlib import Path
 
@@ -524,9 +525,22 @@ def make_row(unit, level, codec, param, image, file, recon, seconds, **extra):
     return jsonable(row)
 
 
+def failure_detail(exc):
+    """The cause of a failure: the exception and, for a program that failed, the tails of its stdout and stderr kept
+    by run_tool (2000 characters each) - the message of a CalledProcessError alone names only the command and code."""
+    text = f"{type(exc).__name__}: {str(exc)[:400]}"
+    if isinstance(exc, subprocess.CalledProcessError):
+        for name, tail in (("stdout", exc.output), ("stderr", exc.stderr)):
+            if isinstance(tail, bytes):
+                tail = tail.decode("utf-8", errors="replace")
+            if tail:
+                text += f"\n{name}: {tail}"
+    return text
+
+
 def error_row(unit, level, codec, param, exc, **extra):
     return {"key": f"{unit}|{codec}|{param}", "unit": unit, "level": level, "codec": codec, "param": param,
-            "status": "error", "detail": f"{type(exc).__name__}: {str(exc)[:400]}", "file_bytes": None, "cr_file": None,
+            "status": "error", "detail": failure_detail(exc), "file_bytes": None, "cr_file": None,
             "bpp": None, "psnr_db": None, "psnr_hvs_m_db": None, "haarpsi": None, "seconds": None,
             "seconds_metrics": None, "file_sha256": None, "recon_sha256": None, **extra}
 

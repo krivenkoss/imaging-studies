@@ -18,12 +18,18 @@ table beside it, which the run must not read. VTM is a substitute coder with a g
   line counted by hand; the session file holds the output; --status of a running, a stopped and a cut-off session
   (the journal unchanged by it); another commit refused; a failed grid node runs again once, right after the
   failure, and the image is refined in the same session; failed twice - the grid waits for the next session and
-  the session writes no run file.
+  the session writes no run file;
+- assembly from the journal (cycle 14): a journal with a task failing at every attempt gives rows equal to an
+  uninterrupted run except that task (its rows `error`, attempts counted), without calling a coder (the substitute
+  coders fail when called); an existing file, another sha256 of the journal and an unfinished run are refused;
+  the cause of a failed program carries the stderr of a substitute program.
 """
 
 import hashlib
 import importlib.util
 import json
+import subprocess
+import sys
 import threading
 import time
 import zipfile
@@ -192,15 +198,16 @@ def test_privacy_no_names_no_pixels(e4, setup, tmp_path):
     for name in NAMES:
         for part in (name, Path(name).stem, json.dumps(name)[1:-1]):
             assert not any(part in t for t in texts), part
-
-    def longest_int_list(obj):
-        if isinstance(obj, list):
-            own = len(obj) if obj and all(isinstance(x, int) and not isinstance(x, bool) for x in obj) else 0
-            return max([own] + [longest_int_list(x) for x in obj])
-        if isinstance(obj, dict):
-            return max([0] + [longest_int_list(x) for x in obj.values()])
-        return 0
     assert longest_int_list(json.loads(texts[0])) < 64  # no row of pixels anywhere
+
+
+def longest_int_list(obj):
+    if isinstance(obj, list):
+        own = len(obj) if obj and all(isinstance(x, int) and not isinstance(x, bool) for x in obj) else 0
+        return max([own] + [longest_int_list(x) for x in obj])
+    if isinstance(obj, dict):
+        return max([0] + [longest_int_list(x) for x in obj.values()])
+    return 0
 
 
 def test_plan_by_hand(e4, setup):
@@ -413,3 +420,74 @@ def test_a_node_failed_twice_leaves_the_grid_to_the_next_session(e4, setup, fake
     assert rows == expected and record["retried_tasks"] == 1
     assert record["summary"]["refinement"]["D01"]["qps"] == [21, 22, 23]
     assert [s["end"] for s in record["summary"]["sessions"]] == ["ended with tasks left", "finished the run"]
+
+
+# ---------------------------------------------------------------- assembly from the journal (cycle 14)
+
+ALWAYS = "D02_r01_c00|vtm|50"  # a fragment task that fails at every attempt (not a control task)
+
+
+def never_called(*args, **kwargs):
+    raise AssertionError("the assembly called a coder")
+
+
+def test_assembly_from_a_journal_with_a_task_failing_every_time(e4, setup, fake, tmp_path, monkeypatch):
+    _, _, registry, tile_rows, _ = setup
+    levels = e4.unit_levels(registry, tile_rows)
+    expected = reference(e4, setup, fake, tmp_path)
+    out = tmp_path / "out"
+    f = fake(fail={ALWAYS: 99, "D01|vtm|20": 1})  # a grid node fails once and works on its retry
+    for _ in range(2):
+        assert run(e4, setup, out, plan=PLAN1, log=f.log) is None  # tasks left: no run file
+    monkeypatch.setattr(e4, "vtm_task", never_called)
+    monkeypatch.setattr(e4, "still_task", never_called)
+    sha = hashlib.sha256((out / e4.JOURNAL_FILE).read_bytes()).hexdigest()
+    run_path, book_path = e4.assemble(out, levels, TIMING, {"core_commit": "assembly", "core_tree": "tree"},
+                                      journal_sha256=sha, log=lambda *a: None)
+    record, rows = keyed(run_path)
+    assert {k: v for k, v in rows.items() if k != ALWAYS} == {k: v for k, v in expected.items() if k != ALWAYS}
+    assert len(record["rows"]) == len(expected) and rows[ALWAYS][0] == "error"
+    row = next(r for r in record["rows"] if r["key"] == ALWAYS)
+    assert row["attempts"] == 4 and row["detail"].startswith("RuntimeError: substitute failure")
+    a = record["assembled"]
+    assert a["line"] == "собран из журнала: незаконченных задач 1" and a["journal_sha256"] == sha
+    assert (a["journal_commit"], a["assembly_commit"], record["core_commit"]) == ("test", "assembly", "test")
+    assert a["unfinished"] == [{"task": ALWAYS, "attempts": 4, "detail": row["detail"]}]
+    assert [s["end"] for s in record["summary"]["sessions"]] == ["ended with tasks left"] * 2
+    assert record["summary"]["refinement"]["D01"]["qps"] == [21, 22, 23]  # the node failed once: its last entry counts
+    assert len(record["summary"]["determinism"]) == 2 and all(d["equal"] for d in record["summary"]["determinism"])
+    assert ("Собран из журнала", a["line"]) in [tuple(x) for x in record["summary_lines"]]
+    from openpyxl import load_workbook
+    strings = load_workbook(book_path)["Строки"]
+    found = [r for r in strings.iter_rows(min_row=3, values_only=True) if r[0] == ALWAYS]
+    assert len(found) == 1 and found[0][5] == "error" and found[0][15] == row["detail"]  # status and cause
+    assert longest_int_list(record["rows"]) == 0  # privacy: no list of integers in the rows of tasks
+    with pytest.raises(e4.RunRefusal, match="already exists"):
+        e4.assemble(out, levels, TIMING, STATE, journal_sha256=sha)
+
+
+def test_assembly_refuses_another_journal_and_an_unfinished_run(e4, setup, fake, tmp_path):
+    _, _, registry, tile_rows, _ = setup
+    levels = e4.unit_levels(registry, tile_rows)
+    out = tmp_path / "out"
+    with pytest.raises(e4.RunStopped):
+        run(e4, setup, out, plan=PLAN1, log=fake().log, stop_after=3)
+    sha = hashlib.sha256((out / e4.JOURNAL_FILE).read_bytes()).hexdigest()
+    with pytest.raises(e4.RunRefusal, match="the assembly is declared for " + "0" * 64):
+        e4.assemble(out, levels, TIMING, STATE, journal_sha256="0" * 64)
+    with pytest.raises(e4.RunRefusal, match="the journal is not a finished run"):
+        e4.assemble(out, levels, TIMING, STATE, journal_sha256=sha)
+    assert not (out / e4.RUN_FILE).exists()
+
+
+def test_the_cause_of_a_failed_program_carries_its_output(e4):
+    from imstudies.lab.coders.process import run_tool
+
+    program = [sys.executable, "-c", "import sys; print('stdout of the substitute'); "
+               "sys.stderr.write('Error: bad VVC NAL in the substitute'); sys.exit(1)"]
+    with pytest.raises(subprocess.CalledProcessError) as caught:
+        run_tool(program, 60)
+    row = e4.e4_book.error_row("D01", "m", "vtm", 46, caught.value)
+    assert row["status"] == "error" and row["detail"].startswith("CalledProcessError: ")
+    assert "\nstdout: stdout of the substitute" in row["detail"]
+    assert row["detail"].endswith("\nstderr: Error: bad VVC NAL in the substitute")
