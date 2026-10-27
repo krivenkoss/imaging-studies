@@ -249,7 +249,7 @@ def test_fig1_initial_data_by_the_rules(built):
     e4, e5, e6, tiles = sources(built)
     median, want = typical_by_rule(built["fragments"])
     plt, _ = fg.setup(style)
-    fig, data, series, dpi, panels, caption = fg.fig1(e5, tiles, built["arrays"], style, plt)
+    fig, data, series, dpi, panels, caption = fg.fig1(e5, tiles, built["arrays"], style, plt, "png")
     a, b, c = fig.axes
     grid = b11_grid(*D10_SHAPE)
     frames = sorted((p.get_x() + 0.5, p.get_y() + 0.5, p.get_width(), p.get_height(), p.get_edgecolor()) for p in a.patches)
@@ -257,7 +257,7 @@ def test_fig1_initial_data_by_the_rules(built):
     mark = matplotlib_colour(style["figures"]["fig1_mark_color"])
     marked = sorted((f[0], f[1]) for f in frames if tuple(f[4]) == mark)
     assert marked == sorted(grid[u] for u in want)
-    assert sorted(t.get_text() for t in a.texts) == ["(b)", "(c)"]
+    assert sorted(t.get_text() for t in a.texts) == ["b", "c"]
     for ax, unit in ((b, want[0]), (c, want[1])):
         (shown,) = ax.get_images()
         x, y = grid[unit]
@@ -269,6 +269,42 @@ def test_fig1_initial_data_by_the_rules(built):
     assert [r["mgm"] for r in data if r.get("kind") == "median MGM"] == [median]
     assert want[0] in caption["value"] and want[1] in caption["value"] and f"{median:.4f}" in caption["value"]
     plt.close(fig)
+
+
+def test_fig1_is_one_row_of_one_height_in_the_pdf_and_whole_multiples_in_the_png(built):
+    fg = built["fg"]
+    style = style_of(fg)
+    _, e5, _, tiles = sources(built)
+    plt, _ = fg.setup(style)
+    H, W = D10_SHAPE
+    for target in ("pdf", "png"):
+        fig = fg.fig1(e5, tiles, built["arrays"], style, plt, target)[0]
+        width_cm, height_cm = (v * 2.54 for v in fig.get_size_inches())
+        assert abs(width_cm - 18.1) < 0.01 and height_cm <= 6.0, (target, width_cm, height_cm)
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+        a, b, c = (ax.get_window_extent(renderer) for ax in fig.axes)
+        assert a.x1 < b.x0 and b.x1 < c.x0, target  # one row, in the order (a), (b), (c)
+        assert max(a.y0, b.y0, c.y0) < min(a.y1, b.y1, c.y1), target
+        letters = [x for x in fig.texts if x.get_text() in ("(a)", "(b)", "(c)")]
+        assert sorted(x.get_text() for x in letters) == ["(a)", "(b)", "(c)"]
+        for letter in letters:
+            box = letter.get_window_extent(renderer)
+            assert box.y1 < min(a.y0, b.y0, c.y0), (target, letter.get_text())  # below the rasters, not over them
+            assert not any(box.overlaps(x) for x in (a, b, c)), (target, letter.get_text())
+        if target == "pdf":
+            heights = [x.height for x in (a, b, c)]
+            assert max(heights) - min(heights) < 1e-6 and abs(a.y0 - b.y0) < 1e-6 and abs(b.y0 - c.y0) < 1e-6
+            assert abs((b.x0 - a.x1) - (c.x0 - b.x1)) < 1e-6  # equal gaps
+            assert abs(a.width / a.height - W / H) < 1e-9 and abs(b.width - b.height) < 1e-6
+            left, right = a.x0, fig.bbox.width - c.x1
+            assert abs(left - right) < 1e-6 and left < 0.01 * fig.bbox.width  # the row spans the width, margin to margin
+        else:
+            boxes = [tuple(round(v) for v in (x.x0, x.y0, x.width, x.height)) for x in (a, b, c)]
+            assert all(abs(v - round(v)) < 1e-6 for x in (a, b, c) for v in (x.x0, x.y0, x.width, x.height))
+            assert boxes[0][2:] == (W, H) and boxes[1][2:] == boxes[2][2:] == (512 * 3, 512 * 3)
+            assert abs((a.y0 + a.height / 2) - (b.y0 + b.height / 2)) <= 0.5 and b.y0 == c.y0  # centred, not stretched
+        plt.close(fig)
 
 
 def matplotlib_colour(text):
@@ -303,7 +339,7 @@ def test_figure_csv_equal_the_run_files(built):
     assert len(fig4) == 1 + 16 + 1 + 4 + 10  # blocks, region, panels, the boxes of the PNG - no pixel
     fig1 = read_csv(built["out"] / "figures" / "fig1.csv")
     head = fig1[0]
-    assert len([r for r in fig1[1:] if r[head.index("kind")] == "tile"]) == 8 and len(fig1) == 1 + 8 + 1 + 3
+    assert len([r for r in fig1[1:] if r[head.index("kind")] == "tile"]) == 8 and len(fig1) == 1 + 8 + 1 + 3 + 3
 
 
 def plotted(built):
@@ -492,7 +528,8 @@ def test_no_vvc_vtm_in_any_output(built, tmp_path):
                 assert not any(isinstance(v, str) and "VVC (VTM)" in v for v in row), path.name
     e4, e5, e6, tiles = sources(built)
     plt, _ = fg.setup(style)
-    figs = [fg.fig1(e5, tiles, built["arrays"], style, plt)[0], fg.fig2(e4, e5, style, plt)[0], fg.fig3(e5, style, plt)[0],
+    figs = [fg.fig1(e5, tiles, built["arrays"], style, plt, "png")[0], fg.fig1(e5, tiles, built["arrays"], style, plt, "pdf")[0],
+            fg.fig2(e4, e5, style, plt)[0], fg.fig3(e5, style, plt)[0],
             drawn_fig4(built, tmp_path)[3][0]]
     texts = [t.get_text() for fig in figs for t in fig.findobj(match=lambda o: hasattr(o, "get_text"))]
     assert texts and not any("VVC (VTM)" in t or CYRILLIC.search(t) for t in texts)

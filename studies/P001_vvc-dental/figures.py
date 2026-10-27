@@ -442,10 +442,40 @@ def panel_rows(panels, dpi):
 
 # ---------------------------------------------------------------- Fig. 1: the initial data
 
-def fig1(e5, tiles, arrays, style, plt):
-    """(a) the whole image with the grid of its fragments (B11), the frames of (b) and (c) marked and lettered;
-    (b), (c) - its fragments with MGM closest to the median MGM of all fragments. In the PNG the image is 1 : 1 and
-    the fragments are repeated fig1_fragment_scale times; the dpi follows."""
+def fig1_layout(width, height, side, style):
+    """One row over the full width - the image (width x height) and the fragments (side x side in the PNG). The dpi
+    is the smallest at which the PNG row with its gaps and margins fits the width; (dpi, canvas, PNG boxes, PDF boxes,
+    the top of the row of letters): PNG boxes - whole pixels, the image 1 : 1, the fragments at their scale, centred in
+    height; PDF boxes - the three panels of one height with equal gaps from margin to margin of the same canvas."""
+    p = style["page"]
+    n, letters = 1 + len(FIG1_LETTERS), "a" + FIG1_LETTERS
+    width_in = p["double_column_cm"] / 2.54
+    spaces_in = ((n - 1) * p["image_gap_pt"] + 2 * p["image_margin_pt"]) / 72
+    dpi = math.ceil((width + len(FIG1_LETTERS) * side) / (width_in - spaces_in))
+    gap, margin = points(p["image_gap_pt"], dpi), points(p["image_margin_pt"], dpi)
+    row = max(height, side)
+    canvas = (round(width_in * dpi), margin + row + points(1.6 * p["font_size_pt"], dpi) + margin)
+    sizes = [(width, height)] + [(side, side)] * len(FIG1_LETTERS)
+    x = (canvas[0] - sum(w for w, _ in sizes) - (n - 1) * gap) // 2
+    if x < 0:
+        raise RunRefusal(f"Fig. 1: the row of {sum(w for w, _ in sizes)} pixels does not fit {canvas[0]} at {dpi} dpi")
+    png = {}
+    for letter, (w, h) in zip(letters, sizes):
+        png[letter] = (x, margin + (row - h) // 2, w, h)
+        x += w + gap
+    h = (canvas[0] - 2 * margin - (n - 1) * gap) / (width / height + len(FIG1_LETTERS))
+    pdf, x = {}, margin
+    for letter, w in zip(letters, [h * width / height] + [h] * len(FIG1_LETTERS)):
+        pdf[letter] = (x, margin + (row - h) / 2, w, h)
+        x += w + gap
+    return dpi, canvas, png, pdf, margin + row
+
+
+def fig1(e5, tiles, arrays, style, plt, target):
+    """One row: (a) the whole image with the grid of its fragments (B11), the frames of (b) and (c) marked and lettered;
+    (b), (c) - its fragments with MGM closest to the median MGM of all fragments; the letters of the panels below the
+    row. `target` - "png": the image 1 : 1 and the fragments repeated fig1_fragment_scale times on whole pixels;
+    "pdf": the three rasters of one height (fig1_layout)."""
     from matplotlib.patches import Rectangle
 
     p, f = style["page"], style["figures"]
@@ -455,16 +485,8 @@ def fig1(e5, tiles, arrays, style, plt):
     whole = arrays[FIG1_IMAGE]
     height, width = whole.shape
     k = f["fig1_fragment_scale"]
-    side = int(tile * k)
-    if len(FIG1_LETTERS) * side > width:
-        raise RunRefusal(f"Fig. 1: {len(FIG1_LETTERS)} fragments of {side} pixels do not fit under {FIG1_IMAGE} ({width})")
-    width_in = p["double_column_cm"] / 2.54
-    dpi = math.floor(width / (width_in - 2 * p["image_margin_pt"] / 72))
-    canvas_w = round(width_in * dpi)
-    left, top, label = (canvas_w - width) // 2, points(p["image_margin_pt"], dpi), points(2 * p["font_size_pt"], dpi)
-    lower = top + height + label + points(p["image_gap_pt"], dpi)
-    canvas = (canvas_w, lower + side + label + top)
-    boxes = {"a": (left, top, width, height), "b": (left, lower, side, side), "c": (left + width - side, lower, side, side)}
+    dpi, canvas, png_boxes, pdf_boxes, row_bottom = fig1_layout(width, height, int(tile * k), style)
+    boxes = png_boxes if target == "png" else pdf_boxes
     fig = plt.figure(figsize=(canvas[0] / dpi, canvas[1] / dpi), dpi=dpi)
     ax = pixel_axes(fig, boxes["a"], canvas)
     grey(ax, whole)
@@ -476,23 +498,27 @@ def fig1(e5, tiles, arrays, style, plt):
                                linewidth=f["fig1_mark_width_pt"] if letter else f["fig1_grid_width_pt"], antialiased=False,
                                zorder=3 if letter else 2))
         if letter:
-            ax.text(r["x"] + tile * 0.04, r["y"] + tile * 0.04, f"({letter})", color=f["fig1_mark_color"], ha="left",
-                    va="top", antialiased=False)
-    panels = [{"panel": "a", "unit": FIG1_IMAGE, "array": whole, "box": boxes["a"], "scale": 1, "marks": True}]
+            ax.text(r["x"] + tile * 0.04, r["y"] + tile * 0.04, letter, color=f["fig1_mark_color"], ha="left", va="top",
+                    fontsize=p["font_size_pt"], antialiased=False)
+    panels = [{"panel": "a", "unit": FIG1_IMAGE, "array": whole, "box": png_boxes["a"], "scale": 1, "marks": True}]
     for letter, x in zip(FIG1_LETTERS, picks):
         r = next(r for r in grid if r["tile"] == x["unit"])
         if not np.array_equal(arrays[x["unit"]], whole[r["y"]:r["y"] + tile, r["x"]:r["x"] + tile]):
             raise RunRefusal(f"Fig. 1: {x['unit']} differs from its place in {FIG1_IMAGE} by the grid of cycle 9")
         grey(pixel_axes(fig, boxes[letter], canvas), arrays[x["unit"]])
-        panels.append({"panel": letter, "unit": x["unit"], "array": arrays[x["unit"]], "box": boxes[letter], "scale": k,
+        panels.append({"panel": letter, "unit": x["unit"], "array": arrays[x["unit"]], "box": png_boxes[letter], "scale": k,
                        "marks": False})
+    label = canvas[1] - row_bottom - points(p["image_margin_pt"], dpi)
     for letter, (x, y, w, h) in boxes.items():
-        fig.text((x + w / 2) / canvas[0], 1 - (y + h + label / 2) / canvas[1], f"({letter})", ha="center", va="center")
+        fig.text((x + w / 2) / canvas[0], 1 - (row_bottom + label / 2) / canvas[1], f"({letter})", ha="center", va="center")
     mgms = {x["unit"]: x["mgm"] for x in fragments}
     data = [{"kind": "tile", "unit": r["tile"], "x": r["x"], "y": r["y"], "mgm": mgms[r["tile"]],
              "panel": letters.get(r["tile"], "")} for r in grid]
     data.append({"kind": "median MGM", "mgm": median, "n": len(fragments)})
     data += panel_rows(panels, dpi)
+    data += [{"kind": "pdf panel", "panel": letter, "pdf_x_cm": round(x / dpi * 2.54, 4), "pdf_y_cm": round(y / dpi * 2.54, 4),
+              "pdf_w_cm": round(w / dpi * 2.54, 4), "pdf_h_cm": round(h / dpi * 2.54, 4)}
+             for letter, (x, y, w, h) in pdf_boxes.items()]
     size_cell = cell(tile, "d", tiles, "parameters.tile")
     median_cell = cell(median, ".4f", e5, "analysis.complexity.fragments.mgm", "median")
     count_cell = cell(len(fragments), "d", e5, "analysis.complexity.fragments", "count")
@@ -784,9 +810,14 @@ def build(cache_root, papers_root, paths=None, style_file=STYLE_FILE, force=Fals
     plt, font = setup(style)
     index, captions = [], []
     for n, (fig, data, series, dpi, panels, caption) in enumerate((
-            fig1(e5, tiles, arrays, style, plt), fig2(e4, e5, style, plt), fig3(e5, style, plt),
+            fig1(e5, tiles, arrays, style, plt, "png"), fig2(e4, e5, style, plt), fig3(e5, style, plt),
             fig4(e5, e6, unit, original, recons, style, plt)), 1):
-        fig.savefig(out / "figures" / f"fig{n}.pdf")
+        if n == 1:  # Fig. 1 has a layout of its own for the PDF: the three rasters of one height
+            pdf = fig1(e5, tiles, arrays, style, plt, "pdf")[0]
+            pdf.savefig(out / "figures" / "fig1.pdf")
+            plt.close(pdf)
+        else:
+            fig.savefig(out / "figures" / f"fig{n}.pdf")
         fig.savefig(out / "figures" / f"fig{n}.png", dpi=dpi)
         width, height = (round(v * dpi) for v in fig.get_size_inches())
         plt.close(fig)

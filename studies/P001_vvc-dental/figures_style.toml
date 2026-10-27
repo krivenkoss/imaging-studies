@@ -47,7 +47,7 @@ line_42 = "solid"
 unity_line = "dashed"   # r = 1 on Fig. 3 (b)
 
 [figures]
-fig1_fragment_scale = 2       # Fig. 1: in the PNG the image is 1 : 1, the fragments (b), (c) - repeated this many times
+fig1_fragment_scale = 3       # Fig. 1, one row: in the PNG the image is 1 : 1, the fragments (b), (c) - repeated this many times
 fig1_grid_color = "#56B4E9"   # the frames of the grid of the image (a)
 fig1_grid_width_pt = 0.5
 fig1_mark_color = "#D55E00"   # the frames and letters of the fragments (b), (c) on (a)
