@@ -1,16 +1,16 @@
-# The style of the figures and tables of P001 (STUDY.md section 7, «Вид рядов»; ../../../REFERENCE.md#studies, 4).
-# A change here and a new run of figures.py change the look; the data are not computed again.
+# The style of the figures and tables of P001 (STUDY.md section 7, «Вид рядов», «Линии с маленькими маркерами»;
+# ../../../REFERENCE.md#studies, 4). A change here and a new run of figures.py change the look; the data are not computed again.
 
 [page]
-column_cm = 8.4         # one column - ASSUMPTION from the samples of J. Electr. Eng. (A4, two columns); PAPER.md: no figure rules found
-double_column_cm = 17.4 # two columns - the same assumption
-height_cm = 6.5
+column_cm = 8.8         # one column of J. Electr. Eng. - measured on the samples (PAPER.md, 2026-10-27)
+double_column_cm = 18.1 # the full width of the text - the same measurement
 dpi = 600
-font = "DejaVu Sans"
+font = "Times New Roman"
+font_fallback = "DejaVu Serif"  # taken when the font is not installed; figures.py names the font it took
 font_size_pt = 8
 line_width_pt = 1.0
-marker_size_pt = 4.0
-legend = "best"
+marker_size_pt = 3.0    # small markers on the lines; markers alone and large markers are not allowed (owner, 2026-10-27)
+markevery_max = 25      # at most this many markers on one line, evenly along it
 
 # colours of STUDY.md section 7 (Okabe-Ito; AVIF #CC79A7 - owner decision, cycle 12); a line style and a marker each
 [codecs.vtm]
@@ -38,13 +38,23 @@ line = "dashdot"
 marker = "D"
 
 [thresholds]
-color = "#7F7F7F"
+color = "#7F7F7F"       # the threshold lines and r = 1 are grey
 line_40 = "dotted"
 line_41 = "dashed"
 line_42 = "solid"
+unity_line = "dashed"   # r = 1 on Fig. 2 (b)
 
 [figures]
-fig1_width = "column"
+fig1_width = "column"   # "column" or "double"
+fig1_height_cm = 6.5
+fig1_legend = "upper right"
+fig1_legend_columns = 2
 fig2_width = "column"
-fig3_width = "column"
-threshold_marker_size_pt = 8.0   # the threshold points at 42 dB on Fig. 1: the codec's marker, hollow and larger
+fig2_height_cm = 10.0
+fig2_legend = "upper right"
+fig2_legend_columns = 2
+fig2_legend_headroom = 0.3   # the y axis of both panels goes higher by this share of its span - room for the legend
+fig3_width = "double"
+fig3_height_cm = 8.6
+fig3_frame_color = "#D55E00"  # the frame of the region on the upper row of Fig. 3
+fig3_frame_width_pt = 0.8
