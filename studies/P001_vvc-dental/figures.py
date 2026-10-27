@@ -1,16 +1,19 @@
-"""Figures and tables of the paper P001 from the run files of E4, E5 and E6 - one command. Run: python studies/P001_vvc-dental/figures.py   (--force: overwrite files that exist)
+"""Figures, tables and captions of the paper P001 from the run files of E4, E5, E6 and the grid of cycle 9 - one command. Run: python studies/P001_vvc-dental/figures.py   (--force: overwrite files that exist)
 
-Reads <cache_root>/cycles/13/e4_main.json (pinned sha256), cycles/17/e5_analysis.json and cycles/16/e6_pages.json,
-and the style figures_style.toml beside this script; writes into <papers_root>/P001_vvc-dental/: figures/fig1..fig3
-(.pdf, .png at the dpi of the style, .csv of the plotted data - no pixel) and tables/table1..table3 (.xlsx, .csv) and
-tables/numbers_index.csv - every table cell (every number of a composed cell) and every figure series: the value as
-printed, the run file (relative to cache_root), its sha256, the key in the file, the operation and the format (the
-source of NUMBERS.md). The composition is the one declared in the task of cycle 18; all text is English with a
-decimal point; PCC names the parameter of compression; lines of different colour and style carry small markers
-(STUDY.md section 7). Fig. 3 - the original fragment and the four codecs at the threshold of 42 dB - is drawn from
-reconstructions encoded again with the wrappers of E4 (the function of run_e6.py), each equal to its E4 row by sha256
-of the file and of the reconstruction, otherwise a refusal in words; it is a medical image and stays outside Git.
-A number is never typed by hand: it is read from a run file.
+Reads <cache_root>/cycles/13/e4_main.json (pinned sha256), cycles/17/e5_analysis.json, cycles/16/e6_pages.json and
+cycles/9/p001_tiles.json, the copy data/P001 (Fig. 1 and Fig. 4) and the style figures_style.toml beside this script;
+writes into <papers_root>/P001_vvc-dental/: figures/fig1..fig4 (.pdf, .png, .csv of the plotted data - no pixel),
+figures/captions.txt (the captions of the figures and the titles of the tables), tables/table1..table3 (.xlsx, .csv)
+and tables/numbers_index.csv - every number of every table cell, figure series and caption: the value as printed,
+the run file (relative to cache_root), its sha256, the key in the file, the operation and the format (the source of
+NUMBERS.md). The composition is the one declared in the task of cycle 19; all text is English with a decimal point;
+the codec is "VVC" (VTM only as the implementation in Table 1); lines of different colour and style carry small
+markers (STUDY.md section 7). Images: Fig. 1 - the image D10 of the copy data/P001 with its grid (B11) and two typical
+fragments; Fig. 4 - the original fragment and the four codecs at the threshold of 42 dB from reconstructions encoded
+again with the wrappers of E4 (the function of run_e6.py), each equal to its E4 row by sha256 of the file and of the
+reconstruction, otherwise a refusal in words. The PDF carries every raster as it is; in the PNG every image panel lies
+on whole pixels and takes an integer multiple of its pixels (pixel repetition, checked after writing) - the dpi
+follows from that and is printed. Medical images stay outside Git. A number is never typed by hand.
 """
 
 import argparse
@@ -42,10 +45,13 @@ SCRIPT = "core/studies/P001_vvc-dental/figures.py"
 CODECS = ("vtm", "jpeg", "heif", "avif")
 OTHERS = ("jpeg", "heif", "avif")
 T_MAIN = 42.0
-FIG1_RANK = 77  # the fragment of Fig. 1: the 77th of 154 by ascending MGM, ties - the smaller code
-FRAGMENT = 512  # Fig. 3: the whole fragment in the upper row
-BLOCKS = 4      # Fig. 3: the region is a block of the BLOCKS x BLOCKS grid of the fragment (128 x 128)
-ZOOM = 4        # Fig. 3: the lower row - the region repeated ZOOM times along each axis, no interpolation
+FIG1_IMAGE = "D10"  # the image of Fig. 1 - the owner's choice (task of cycle 19)
+FIG1_LETTERS = "bc"  # its fragments with MGM closest to the median MGM of all fragments, one per letter
+FRAGMENT = 512  # Fig. 4: the whole fragment in the upper row
+BLOCKS = 4      # Fig. 4: the region is a block of the BLOCKS x BLOCKS grid of the fragment (128 x 128)
+ZOOM = 4        # Fig. 4: the lower row - the region repeated ZOOM times along each axis, no interpolation
+MARKS_SHARE = 0.05  # PNG check: at most this share of an image panel may be covered by drawn marks (frames, letters)
+JPEG50_PCC = "50"  # the point JPEG PCC 50 of E5 (STUDY.md section 6) - its PCC by definition
 PCC_MEANING = {"vtm": "QP", "jpeg": "quality", "heif": "quality", "avif": "quality"}  # STUDY.md section 5
 VTM_IMPLEMENTATION = "VTM 23.0 all-intra + GPAC MP4Box 26.08-DEV"  # STUDY.md section 5: E4 holds only the sha256
 VERSION_FIELDS = {  # Table 1: the version numbers taken from header.codec_versions of E4 - (group, ((label, field), ...))
@@ -55,7 +61,7 @@ VERSION_FIELDS = {  # Table 1: the version numbers taken from header.codec_versi
 }
 VERSION = re.compile(r"\d+(?:\.\d+)+(?:\+\d+)?")  # "1.23.6"; "4.3+1" of "x265 HEVC encoder (4.3+1-e9b8812)"
 CONTAINER = {"vtm": "HEIF (vvc1)", "jpeg": "JFIF", "heif": "HEIF (hvc1)", "avif": "AVIF"}
-OUTPUTS = [f"figures/fig{k}.{ext}" for k in (1, 2, 3) for ext in ("pdf", "png", "csv")] + \
+OUTPUTS = [f"figures/fig{k}.{ext}" for k in (1, 2, 3, 4) for ext in ("pdf", "png", "csv")] + ["figures/captions.txt"] + \
           [f"tables/table{k}.{ext}" for k in (1, 2, 3) for ext in ("xlsx", "csv")] + ["tables/numbers_index.csv"]
 INDEX_COLUMNS = ("id", "value", "file", "sha256", "key", "op", "format")
 
@@ -127,7 +133,7 @@ def position(items, **where):
 
 
 def same(values, what):
-    """The one value all entries share - the note of Table 2 prints it once; different values - a refusal."""
+    """The one value all entries share - printed once; different values - a refusal."""
     if len(set(values)) != 1:
         raise RunRefusal(f"{what}: the values differ ({sorted(set(values))[:3]}...) - one value is printed")
     return values[0]
@@ -158,6 +164,38 @@ def name_en(text):
     return "level 50 by Fidler et al." if text.startswith("уровень 50 по Fidler") else "JPEG PCC 50"
 
 
+def threshold(e5, t):
+    """The cell of the threshold t as printed, from thresholds_db of E5."""
+    return cell(t, ".0f", e5, f"thresholds_db[{e5.data['thresholds_db'].index(t)}]")
+
+
+# ---------------------------------------------------------------- the choice of fragments
+
+def typical_fragments(fragments, image, n):
+    """The n fragments of the image with MGM closest to the median MGM of all fragments, ties - the smaller code;
+    (the median, the chosen entries in that order)."""
+    median = float(np.median([f["mgm"] for f in fragments]))
+    mine = sorted((f for f in fragments if f["image"] == image), key=lambda f: (abs(f["mgm"] - median), f["unit"]))
+    if len(mine) < n:
+        raise RunRefusal(f"{image} has {len(mine)} fragments in E5, {n} are needed")
+    return median, mine[:n]
+
+
+def extreme_fragments(fragments):
+    """The fragment of the simplest structure (the smallest MGM) and of the most complex one (the largest MGM); ties -
+    the smaller code."""
+    return (min(fragments, key=lambda f: (f["mgm"], f["unit"])), min(fragments, key=lambda f: (-f["mgm"], f["unit"])))
+
+
+def fragment_cells(e5, unit, what):
+    """The code and the MGM of a fragment as printed, from analysis.complexity.fragments of E5."""
+    fragments = e5.data["analysis"]["complexity"]["fragments"]
+    i = position(fragments, unit=unit)
+    base = f"analysis.complexity.fragments[{i}]"
+    return ((f"{what} fragment", cell(unit, "text", e5, f"{base}.unit")),
+            (f"{what} MGM", cell(fragments[i]["mgm"], ".4f", e5, f"{base}.mgm")))
+
+
 # ---------------------------------------------------------------- tables
 
 def table1(e4, style):
@@ -180,7 +218,8 @@ def table1(e4, style):
         path = "header.plan.vtm.f" if c == "vtm" else f"header.plan.{c}"
         rows.append([constant(style["codecs"][c]["label"]), implementation, constant(PCC_MEANING[c]),
                      cell(f"{min(values)} to {max(values)}", "text", e4, path, "range"), constant(CONTAINER[c])])
-    return head, rows, []
+    title = joined("Table 1. Codecs: implementation and versions, PCC and its range for the fragments, container.")
+    return head, rows, [], title
 
 
 def effect(source, listname, i, c):
@@ -194,27 +233,28 @@ def table2(e5, style):
     """Pairs by rows; patients and whole images at every threshold by columns, "effect (95% CI)"; p (Holm) and the
     conclusion of the rule of STUDY.md section 6 for the three main rows; a note under the table."""
     a, thresholds = e5.data["analysis"], e5.data["thresholds_db"]
+    vvc = style["codecs"]["vtm"]["label"]
     columns = [(listname, t, f"{label}, {t:.0f} dB") for listname, label in
                (("comparisons", "Patients"), ("whole_comparisons", "Whole images")) for t in thresholds]
     head = ("Pair", *(name for _, _, name in columns), f"p (Holm), {T_MAIN:.0f} dB, patients", "Conclusion")
     rows = []
     for b in (*OTHERS, "jpeg_opt"):
         pair = f"vtm/{b}"
-        line = [constant("VVC / JPEG (optimised Huffman)" if b == "jpeg_opt" else f"VVC / {style['codecs'][b]['label']}")]
+        line_ = [constant(f"{vvc} / JPEG (optimised Huffman)" if b == "jpeg_opt" else f"{vvc} / {style['codecs'][b]['label']}")]
         for listname, t, _ in columns:
             i = position(a[listname], pair=pair, t_db=t)
-            line.append(effect(e5, listname, i, a[listname][i]))
+            line_.append(effect(e5, listname, i, a[listname][i]))
         i = position(a["comparisons"], pair=pair, t_db=T_MAIN)
         c, base = a["comparisons"][i], f"analysis.comparisons[{i}]"
         if c["role"] == "основное":
-            line += [cell(c["p_holm"], ".3g", e5, f"{base}.p_holm"),
-                     cell(verdict_en(c["verdict"]), "text", e5, f"{base}.verdict", "verdict")]
+            line_ += [cell(c["p_holm"], ".3g", e5, f"{base}.p_holm"),
+                      cell(verdict_en(c["verdict"]), "text", e5, f"{base}.verdict", "verdict")]
         else:
-            line += [constant("-"), constant("-")]
-        rows.append(line)
+            line_ += [constant("-"), constant("-")]
+        rows.append(line_)
     whole, main = a["whole_comparisons"], pick(a["comparisons"], role="основное")
     note = joined(
-        "Note. Effect - the Hodges-Lehmann estimate of r = CR(VVC) / CR(codec) with its 95% CI; n = ",
+        f"Note. Effect - the Hodges-Lehmann estimate of r = CR({vvc}) / CR(codec) with its 95% CI; n = ",
         ("n patients", cell(same([c["n"] for c in a["comparisons"]], "n of patients"), "d", e5, "analysis.comparisons.n",
                             "same")),
         " patients and n = ",
@@ -228,7 +268,12 @@ def table2(e5, style):
         f" for the three main comparisons ({T_MAIN:.0f} dB, patients).",
         also=[("p, whole images", cell(same([c["p"] for c in whole], "p of whole images"), ".3g", e5,
                                        "analysis.whole_comparisons.p", "same"))])
-    return head, rows, [note]
+    t = [threshold(e5, x) for x in thresholds]
+    title = joined(f"Table 2. Comparison of {vvc} with JPEG, HEIF and AVIF: the effect r = CR({vvc}) / CR(codec) "
+                   "(Hodges-Lehmann estimate) with its ", ("CI level", constant("95")), "% CI for the patients and the "
+                   "whole images at T = ", ("T 1", t[0]), ", ", ("T 2", t[1]), " and ", ("T 3", t[2]),
+                   " dB; p (Holm) and the conclusion of the decision rule for the three main comparisons.")
+    return head, rows, [note], title
 
 
 def spread(source, key, values, centre, low, high, fmt):
@@ -241,23 +286,27 @@ def spread(source, key, values, centre, low, high, fmt):
 
 
 def table3(e5, style):
-    """At the threshold of 42 dB by codec: CR over the patients, PSNR and HaarPSI over the fragments; and the point
-    JPEG PCC 50 with the share of units at or above 42 dB."""
-    head = ("Codec or point", "n patients", "CR, median (q25–q75)", "n fragments", "PSNR, dB, median (min–max)",
-            "HaarPSI, median (min–max)", f"PSNR-HVS-M ≥ {T_MAIN:.0f} dB: fragments; whole images")
+    """At the threshold of 42 dB by codec: CR over the patients; the threshold PCC, PSNR and HaarPSI over the
+    fragments; and the point JPEG PCC 50 with the share of units at or above 42 dB."""
     a = e5.data["analysis"]
-    rows = []
+    rows, counts = [], []
     for c in CODECS:
         pw = dict(codec=c, t_db=T_MAIN)
         uw = dict(level="f", codec=c, t_db=T_MAIN, judged=True)
         crs = [p["median_cr"] for p in pick(a["patients"], **pw)]
         units = pick(a["units"], **uw)
+        counts.append(len(units))
         pk, uk = f"analysis.patients[{where_text(**pw)}]", f"analysis.units[{where_text(**uw)}]"
         rows.append([constant(style["codecs"][c]["label"]), cell(len(crs), "d", e5, pk, "count"),
                      spread(e5, f"{pk}.median_cr", crs, "median", "q25", "q75", ".2f"), cell(len(units), "d", e5, uk, "count"),
+                     spread(e5, f"{uk}.pcc", [u["pcc"] for u in units], "median", "min", "max", "g"),
                      spread(e5, f"{uk}.psnr_db", [number(u["psnr_db"]) for u in units], "median", "min", "max", ".2f"),
                      spread(e5, f"{uk}.haarpsi", [u["haarpsi"] for u in units], "median", "min", "max", ".4f"),
                      constant("-")])
+    head = ("Codec or point", "n patients", "CR, median (q25–q75)", "n fragments",
+            f"Threshold PCC for T = {T_MAIN:.0f} dB, median (min–max), {same(counts, 'n fragments')} fragments",
+            "PSNR, dB, median (min–max)", "HaarPSI, median (min–max)",
+            f"PSNR-HVS-M ≥ {T_MAIN:.0f} dB: fragments; whole images")
     j = a["jpeg50"]
     name = name_en(j["name"])
     label = cell(name, "text", e5, "analysis.jpeg50.name", "name")
@@ -269,20 +318,31 @@ def table3(e5, style):
         reached += ["; "] if k else []
         reached += [(f"{what} at or above", cell(s["count"], "d", e5, f"{base}.count")), " of ",
                     (f"{what}", cell(s["n"], "d", e5, f"{base}.n"))]
-    rows.append([joined("JPEG PCC 50 (", ("name", label), ")") if name != "JPEG PCC 50" else label,
+    rows.append([joined(f"JPEG PCC {JPEG50_PCC} (", ("name", label), ")") if name != "JPEG PCC 50" else label,
                  cell(len(j["patients"]), "d", e5, "analysis.jpeg50.patients", "count"),
                  spread(e5, "analysis.jpeg50.patients.median_cr", [p["median_cr"] for p in j["patients"]], "median", "q25",
                         "q75", ".2f"),
                  cell(len(units), "d", e5, "analysis.jpeg50.units[level=f]", "count"),
+                 constant(JPEG50_PCC),
                  spread(e5, "analysis.jpeg50.units[level=f].psnr_db", [number(u["psnr_db"]) for u in units], "median", "min",
                         "max", ".2f"),
                  spread(e5, "analysis.jpeg50.units[level=f].haarpsi", [u["haarpsi"] for u in units], "median", "min", "max",
                         ".4f"),
                  joined(*reached)])
-    return head, rows, []
+    pw, uw = dict(codec="vtm", t_db=T_MAIN), dict(level="f", codec="vtm", t_db=T_MAIN, judged=True)
+    title = joined("Table 3. At the threshold T = ", ("T", threshold(e5, T_MAIN)), " dB by codec and at the point JPEG PCC ",
+                   ("JPEG point", constant(JPEG50_PCC)), ": CR over n = ",
+                   ("n patients", cell(len(pick(a["patients"], **pw)), "d", e5, f"analysis.patients[{where_text(**pw)}]",
+                                       "count")),
+                   " patients; the threshold PCC, PSNR and HaarPSI over n = ",
+                   ("n fragments", cell(len(pick(a["units"], **uw)), "d", e5, f"analysis.units[{where_text(**uw)}]",
+                                        "count")),
+                   " fragments; at JPEG PCC ", ("JPEG point again", constant(JPEG50_PCC)),
+                   " - the share of the units with PSNR-HVS-M ≥ ", ("T again", threshold(e5, T_MAIN)), " dB.")
+    return head, rows, [], title
 
 
-# ---------------------------------------------------------------- figures
+# ---------------------------------------------------------------- figures: common
 
 def setup(style):
     """matplotlib with the font of the style, or its fallback when the font is not installed; (pyplot, the font)."""
@@ -299,6 +359,8 @@ def setup(style):
     except ValueError:
         font = p["font_fallback"]
     plt.rcParams.update({"font.family": font, "font.size": p["font_size_pt"], "legend.fontsize": p["font_size_pt"],
+                         "axes.titlesize": p["font_size_pt"], "axes.labelsize": p["font_size_pt"],
+                         "xtick.labelsize": p["font_size_pt"], "ytick.labelsize": p["font_size_pt"],
                          "lines.linewidth": p["line_width_pt"], "lines.markersize": p["marker_size_pt"],
                          "axes.unicode_minus": False, "pdf.fonttype": 42, "mathtext.default": "regular"})
     return plt, font
@@ -329,76 +391,218 @@ def plain_log(axis):
     axis.set_minor_formatter(NullFormatter())
 
 
-def fig1(e4, e5, style, plt):
-    """PSNR-HVS-M = f(CR) of one fragment: four lines with small markers, the threshold lines in grey."""
-    fragments = sorted(e5.data["analysis"]["complexity"]["fragments"], key=lambda f: (f["mgm"], f["unit"]))
-    unit = fragments[FIG1_RANK - 1]["unit"]
-    fig, ax = plt.subplots(figsize=size(style, "fig1"), constrained_layout=True)
-    data, series = [], []
-    for c in CODECS:
-        s = style["codecs"][c]
-        rows = sorted((r for r in e4.data["rows"] if r["unit"] == unit and r["codec"] == c and r["status"] == "valid"),
-                      key=lambda r: r["cr_file"])
-        line(ax, [r["cr_file"] for r in rows], [r["psnr_hvs_m_db"] for r in rows], s, style, s["label"])
-        data += [{"fragment": unit, "codec": c, "pcc": r["param"], "cr": r["cr_file"], "psnr_hvs_m_db": r["psnr_hvs_m_db"]}
-                 for r in rows]
-        series.append((f"Fig. 1 / {s['label']}", cell(len(rows), "d", e4, f"rows[{where_text(unit=unit, codec=c, status='valid')}]",
-                                                       "count")))
+def points(pt, dpi):
+    """Points as whole pixels at the dpi, rounded up."""
+    return math.ceil(pt * dpi / 72)
+
+
+def pixel_axes(fig, box, canvas):
+    """Axes over the box (x, y, w, h) in whole pixels from the top left of a canvas (W, H) in pixels, no frame."""
+    (x, y, w, h), (width, height) = box, canvas
+    ax = fig.add_axes((x / width, 1 - (y + h) / height, w / width, h / height))
+    ax.set_axis_off()
+    return ax
+
+
+def grey(ax, image):
+    """The 8-bit values as they are: grey RGB of the very values, no colour map, no interpolation, no stretch of levels;
+    the image fills its axes. Marks drawn over an image are not antialiased: a blended edge would turn image pixels into
+    other grey levels."""
+    ax.imshow(np.stack([image] * 3, axis=-1), interpolation="none", aspect="auto")
+
+
+def check_png(path, panels):
+    """Every image panel of the PNG: its box holds its raster repeated `scale` times along each axis, pixel for pixel;
+    under the drawn marks (coloured frames and letters) only the grey pixels count, the marks cover at most
+    MARKS_SHARE of the panel; otherwise a refusal."""
+    from PIL import Image
+
+    png = np.asarray(Image.open(path).convert("RGB"))
+    for p in panels:
+        x, y, w, h = p["box"]
+        k = p["scale"]
+        if k != int(k) or k < 1 or (w, h) != (p["array"].shape[1] * k, p["array"].shape[0] * k):
+            raise RunRefusal(f"{path.name}, panel {p['panel']}: the box {w} x {h} is not a whole multiple of "
+                             f"{p['array'].shape[1]} x {p['array'].shape[0]} (scale {k})")
+        want = np.repeat(np.repeat(p["array"], int(k), axis=0), int(k), axis=1)
+        got = png[y:y + h, x:x + w]
+        flat = (got[..., 0] == got[..., 1]) & (got[..., 1] == got[..., 2])
+        if p["marks"]:
+            equal = np.array_equal(got[..., 0][flat], want[flat]) and float((~flat).mean()) <= MARKS_SHARE
+        else:
+            equal = bool(flat.all()) and np.array_equal(got[..., 0], want)
+        if not equal:
+            raise RunRefusal(f"{path.name}, panel {p['panel']}: the PNG is not the raster repeated {k} times pixel for pixel")
+
+
+def panel_rows(panels, dpi):
+    return [{"kind": "png panel", "panel": p["panel"], "unit": p["unit"], "png_x": p["box"][0], "png_y": p["box"][1],
+             "png_w": p["box"][2], "png_h": p["box"][3], "scale": p["scale"], "dpi": dpi} for p in panels]
+
+
+# ---------------------------------------------------------------- Fig. 1: the initial data
+
+def fig1(e5, tiles, arrays, style, plt):
+    """(a) the whole image with the grid of its fragments (B11), the frames of (b) and (c) marked and lettered;
+    (b), (c) - its fragments with MGM closest to the median MGM of all fragments. In the PNG the image is 1 : 1 and
+    the fragments are repeated fig1_fragment_scale times; the dpi follows."""
+    from matplotlib.patches import Rectangle
+
+    p, f = style["page"], style["figures"]
+    fragments = e5.data["analysis"]["complexity"]["fragments"]
+    median, picks = typical_fragments(fragments, FIG1_IMAGE, len(FIG1_LETTERS))
+    tile, grid = tiles.data["parameters"]["tile"], [r for r in tiles.data["rows"] if r["code"] == FIG1_IMAGE]
+    whole = arrays[FIG1_IMAGE]
+    height, width = whole.shape
+    k = f["fig1_fragment_scale"]
+    side = int(tile * k)
+    if len(FIG1_LETTERS) * side > width:
+        raise RunRefusal(f"Fig. 1: {len(FIG1_LETTERS)} fragments of {side} pixels do not fit under {FIG1_IMAGE} ({width})")
+    width_in = p["double_column_cm"] / 2.54
+    dpi = math.floor(width / (width_in - 2 * p["image_margin_pt"] / 72))
+    canvas_w = round(width_in * dpi)
+    left, top, label = (canvas_w - width) // 2, points(p["image_margin_pt"], dpi), points(2 * p["font_size_pt"], dpi)
+    lower = top + height + label + points(p["image_gap_pt"], dpi)
+    canvas = (canvas_w, lower + side + label + top)
+    boxes = {"a": (left, top, width, height), "b": (left, lower, side, side), "c": (left + width - side, lower, side, side)}
+    fig = plt.figure(figsize=(canvas[0] / dpi, canvas[1] / dpi), dpi=dpi)
+    ax = pixel_axes(fig, boxes["a"], canvas)
+    grey(ax, whole)
+    letters = {x["unit"]: letter for letter, x in zip(FIG1_LETTERS, picks)}
+    for r in grid:
+        letter = letters.get(r["tile"])
+        ax.add_patch(Rectangle((r["x"] - 0.5, r["y"] - 0.5), tile, tile, fill=False,
+                               edgecolor=f["fig1_mark_color"] if letter else f["fig1_grid_color"],
+                               linewidth=f["fig1_mark_width_pt"] if letter else f["fig1_grid_width_pt"], antialiased=False,
+                               zorder=3 if letter else 2))
+        if letter:
+            ax.text(r["x"] + tile * 0.04, r["y"] + tile * 0.04, f"({letter})", color=f["fig1_mark_color"], ha="left",
+                    va="top", antialiased=False)
+    panels = [{"panel": "a", "unit": FIG1_IMAGE, "array": whole, "box": boxes["a"], "scale": 1, "marks": True}]
+    for letter, x in zip(FIG1_LETTERS, picks):
+        r = next(r for r in grid if r["tile"] == x["unit"])
+        if not np.array_equal(arrays[x["unit"]], whole[r["y"]:r["y"] + tile, r["x"]:r["x"] + tile]):
+            raise RunRefusal(f"Fig. 1: {x['unit']} differs from its place in {FIG1_IMAGE} by the grid of cycle 9")
+        grey(pixel_axes(fig, boxes[letter], canvas), arrays[x["unit"]])
+        panels.append({"panel": letter, "unit": x["unit"], "array": arrays[x["unit"]], "box": boxes[letter], "scale": k,
+                       "marks": False})
+    for letter, (x, y, w, h) in boxes.items():
+        fig.text((x + w / 2) / canvas[0], 1 - (y + h + label / 2) / canvas[1], f"({letter})", ha="center", va="center")
+    mgms = {x["unit"]: x["mgm"] for x in fragments}
+    data = [{"kind": "tile", "unit": r["tile"], "x": r["x"], "y": r["y"], "mgm": mgms[r["tile"]],
+             "panel": letters.get(r["tile"], "")} for r in grid]
+    data.append({"kind": "median MGM", "mgm": median, "n": len(fragments)})
+    data += panel_rows(panels, dpi)
+    size_cell = cell(tile, "d", tiles, "parameters.tile")
+    median_cell = cell(median, ".4f", e5, "analysis.complexity.fragments.mgm", "median")
+    count_cell = cell(len(fragments), "d", e5, "analysis.complexity.fragments", "count")
+    chosen = [fragment_cells(e5, x["unit"], f"({letter})") for letter, x in zip(FIG1_LETTERS, picks)]
+    series = [("Fig. 1 / fragment side, pixels", size_cell),
+              ("Fig. 1 / grid frames", cell(len(grid), "d", tiles, f"rows[code={FIG1_IMAGE}]", "count")),
+              ("Fig. 1 / median MGM", median_cell), ("Fig. 1 / fragments", count_cell)] + \
+             [(f"Fig. 1 / {name}", c) for pair in chosen for name, c in pair]
+    caption = joined("Fig. 1. The dental image ", ("image", constant(FIG1_IMAGE)), " with the grid of its ",
+                     ("fragment width", size_cell), " × ", ("fragment height", size_cell),
+                     " pixel fragments (a) and its two fragments with MGM closest to the median MGM of the ",
+                     ("fragments", count_cell), " fragments (", ("median MGM", median_cell), "): ",
+                     chosen[0][0], ", MGM = ", chosen[0][1], " (b) and ", chosen[1][0], ", MGM = ", chosen[1][1], " (c).")
+    return fig, data, series, dpi, panels, caption
+
+
+# ---------------------------------------------------------------- Fig. 2 and Fig. 3: the plots
+
+def fig2(e4, e5, style, plt):
+    """Dependences of PSNR-HVS-M (a, b) and PSNR (c, d) on CR for the fragment of the simplest structure (a, c) and of
+    the most complex one (b, d): four lines with small markers, the threshold lines in grey on (a, b), one legend."""
+    simple, complex_ = extreme_fragments(e5.data["analysis"]["complexity"]["fragments"])
+    fig, axes = plt.subplots(2, 2, figsize=size(style, "fig2"), constrained_layout=True)
     t = style["thresholds"]
-    for level in e5.data["thresholds_db"]:
-        ax.axhline(level, color=t["color"], linestyle=t[f"line_{level:.0f}"], linewidth=style["page"]["line_width_pt"],
-                   label=f"T = {level:.0f} dB")
-    series.append(("Fig. 1 / threshold lines, dB", cell("; ".join(show(x, ".0f") for x in e5.data["thresholds_db"]), "text",
+    data, series = [], []
+    for col, (frag, what) in enumerate(((simple, "simple structure"), (complex_, "complex structure"))):
+        unit = frag["unit"]
+        for row, (metric, field) in enumerate((("PSNR-HVS-M", "psnr_hvs_m_db"), ("PSNR", "psnr_db"))):
+            ax, letter = axes[row, col], "abcd"[2 * row + col]
+            for c in CODECS:
+                s = style["codecs"][c]
+                rows = sorted((r for r in e4.data["rows"] if r["unit"] == unit and r["codec"] == c and r["status"] == "valid"),
+                              key=lambda r: r["cr_file"])
+                line(ax, [r["cr_file"] for r in rows], [r[field] for r in rows], s, style, s["label"])
+                data += [{"panel": letter, "fragment": unit, "codec": c, "pcc": r["param"], "cr": r["cr_file"],
+                          field: r[field]} for r in rows]
+                series.append((f"Fig. 2 ({letter}) / {s['label']}",
+                               cell(len(rows), "d", e4, f"rows[{where_text(unit=unit, codec=c, status='valid')}]", "count")))
+            if row == 0:
+                for level in e5.data["thresholds_db"]:
+                    ax.axhline(level, color=t["color"], linestyle=t[f"line_{level:.0f}"],
+                               linewidth=style["page"]["line_width_pt"], label=f"T = {level:.0f} dB")
+            ax.set_xscale("log")
+            plain_log(ax.xaxis)
+            ax.set_xlabel("CR")
+            ax.set_ylabel(f"{metric}, dB")
+            ax.set_title(f"({letter}) {what}", loc="left")
+    series.append(("Fig. 2 / threshold lines, dB", cell("; ".join(show(x, ".0f") for x in e5.data["thresholds_db"]), "text",
                                                        e5, "thresholds_db", "list")))
-    ax.set_xscale("log")
-    plain_log(ax.xaxis)
-    ax.set_xlabel("CR")
-    ax.set_ylabel("PSNR-HVS-M, dB")
-    ax.legend(loc=style["figures"]["fig1_legend"], ncols=style["figures"]["fig1_legend_columns"])
-    return fig, data, series
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="outside upper center", ncols=style["figures"]["fig2_legend_columns"])
+    cells = [fragment_cells(e5, x["unit"], what) for x, what in ((simple, "simple"), (complex_, "complex"))]
+    series += [(f"Fig. 2 / {name}", c) for pair in cells for name, c in pair]
+    th = [threshold(e5, x) for x in e5.data["thresholds_db"]]
+    caption = joined("Fig. 2. Dependences of PSNR-HVS-M (a,b) and PSNR (c,d) on compression ratio (CR) for the fragments "
+                     "of simple structure ", cells[0][0], ", MGM = ", cells[0][1], " (a,c) and complex structure ",
+                     cells[1][0], ", MGM = ", cells[1][1], " (b,d); horizontal lines - the thresholds T = ", ("T 1", th[0]),
+                     ", ", ("T 2", th[1]), " and ", ("T 3", th[2]), " dB.")
+    return fig, data, series, style["page"]["dpi"], [], caption
 
 
-def fig2(e5, style, plt):
+def fig3(e5, style, plt):
     """Two panels over the MGM of the 16 patients at 42 dB, points in ascending MGM joined by lines: (a) the median CR
     of every codec; (b) r = CR(VVC) / CR(codec) of the three pairs and the line r = 1."""
     a = e5.data["analysis"]
+    vvc = style["codecs"]["vtm"]["label"]
     mgms = {p["image"]: p["mgm"] for p in a["complexity"]["patients"]}
     by_mgm = lambda p: (mgms[p["image"]], p["image"])  # noqa: E731
-    fig, (top, bottom) = plt.subplots(2, 1, figsize=size(style, "fig2"), sharex=True, constrained_layout=True)
-    data, series = [], [("Fig. 2 / x: MGM of the patients", cell(len(mgms), "d", e5, "analysis.complexity.patients",
-                                                                  "count"))]
+    fig, (top, bottom) = plt.subplots(2, 1, figsize=size(style, "fig3"), sharex=True, constrained_layout=True)
+    patients = cell(len(mgms), "d", e5, "analysis.complexity.patients", "count")
+    data, series = [], [("Fig. 3 / x: MGM of the patients", patients)]
     for c in CODECS:
         s = style["codecs"][c]
-        points = sorted(pick(a["patients"], codec=c, t_db=T_MAIN), key=by_mgm)
-        line(top, [mgms[p["image"]] for p in points], [p["median_cr"] for p in points], s, style, s["label"])
+        pts = sorted(pick(a["patients"], codec=c, t_db=T_MAIN), key=by_mgm)
+        line(top, [mgms[p["image"]] for p in pts], [p["median_cr"] for p in pts], s, style, s["label"])
         data += [{"panel": "a", "series": c, "patient": p["image"], "mgm": mgms[p["image"]], "value": p["median_cr"]}
-                 for p in points]
-        series.append((f"Fig. 2 (a) / {s['label']}", cell(len(points), "d", e5,
+                 for p in pts]
+        series.append((f"Fig. 3 (a) / {s['label']}", cell(len(pts), "d", e5,
                                                            f"analysis.patients[{where_text(codec=c, t_db=T_MAIN)}]", "count")))
     for b in OTHERS:
         s, pair = style["codecs"][b], f"vtm/{b}"
-        points = sorted(pick(a["ratios"], pair=pair, t_db=T_MAIN, in_test=True), key=by_mgm)
-        line(bottom, [mgms[p["image"]] for p in points], [p["r"] for p in points], s, style, f"VVC / {s['label']}")
+        pts = sorted(pick(a["ratios"], pair=pair, t_db=T_MAIN, in_test=True), key=by_mgm)
+        line(bottom, [mgms[p["image"]] for p in pts], [p["r"] for p in pts], s, style, f"{vvc} / {s['label']}")
         data += [{"panel": "b", "series": pair, "patient": p["image"], "mgm": mgms[p["image"]], "value": p["r"]}
-                 for p in points]
-        series.append((f"Fig. 2 (b) / VVC / {s['label']}",
-                       cell(len(points), "d", e5, f"analysis.ratios[{where_text(pair=pair, t_db=T_MAIN, in_test=True)}]",
+                 for p in pts]
+        series.append((f"Fig. 3 (b) / {vvc} / {s['label']}",
+                       cell(len(pts), "d", e5, f"analysis.ratios[{where_text(pair=pair, t_db=T_MAIN, in_test=True)}]",
                             "count")))
     t = style["thresholds"]
-    bottom.axhline(1.0, color=t["color"], linestyle=t["unity_line"], linewidth=style["page"]["line_width_pt"], label="r = 1")
-    series.append(("Fig. 2 (b) / reference line", constant("r = 1")))
+    one = constant("1")
+    bottom.axhline(1.0, color=t["color"], linestyle=t["unity_line"], linewidth=style["page"]["line_width_pt"],
+                   label=f"r = {one['value']}")
+    series.append(("Fig. 3 (b) / reference line r", one))
     top.set_title("(a)", loc="left")
     bottom.set_title("(b)", loc="left")
     top.set_ylabel(f"CR at {T_MAIN:.0f} dB, median")
-    bottom.set_ylabel("r = CR(VVC) / CR(codec)")
+    bottom.set_ylabel(f"r = CR({vvc}) / CR(codec)")
     bottom.set_xlabel("MGM of the patient (median over fragments)")
     f = style["figures"]
     for ax in (top, bottom):
         low, high = ax.get_ylim()
-        ax.set_ylim(low, high + (high - low) * f["fig2_legend_headroom"])
-        ax.legend(loc=f["fig2_legend"], ncols=f["fig2_legend_columns"])
-    return fig, data, series
+        ax.set_ylim(low, high + (high - low) * f["fig3_legend_headroom"])
+        ax.legend(loc=f["fig3_legend"], ncols=f["fig3_legend_columns"])
+    caption = joined("Fig. 3. Dependences of the median CR at T = ", ("T", threshold(e5, T_MAIN)), " dB (a) and of r = "
+                     f"CR({vvc}) / CR(codec) (b) on the MGM of the patient (the median over the fragments of the image) "
+                     "for n = ", ("n patients", patients), " patients; dashed line - r = ", ("reference", one), ".")
+    return fig, data, series, style["page"]["dpi"], [], caption
 
+
+# ---------------------------------------------------------------- Fig. 4: against the original
 
 def study_module(name):
     spec = importlib.util.spec_from_file_location(name, STUDY / f"{name}.py")
@@ -407,11 +611,13 @@ def study_module(name):
     return module
 
 
-def load_fragment(paths, unit):
-    """The original fragment from the copy data/P001 and the grid of cycle 9 by the loaders of E4 (B10, B11)."""
+def load_units(paths, codes):
+    """The original units (whole images and fragments) of the copy data/P001 and the grid of cycle 9, by the loaders
+    of E4 (B10, B11); {code: uint8 array}."""
     run_e4 = study_module("run_e4")
     registry, tile_rows, tile = run_e4.load_inputs(paths["data_root"], Path(paths["cache_root"]) / TILES_FILE)
-    return np.ascontiguousarray(run_e4.load_units(paths["data_root"], registry, tile_rows, tile)[unit]["array"])
+    units = run_e4.load_units(paths["data_root"], registry, tile_rows, tile)
+    return {code: np.ascontiguousarray(units[code]["array"]) for code in codes}
 
 
 def encode(paths, codec, image, pcc, work):
@@ -429,14 +635,14 @@ def region_of(original):
     return r, c, scores[(r, c)], scores
 
 
-def comparison(e4, e5, e6, paths, work, log):
+def comparison(e4, e5, e6, arrays, paths, work, log):
     """The fragment of the first page of E6 (the largest MGM of E5) and its four reconstructions at the threshold PCC of
     42 dB, every one encoded again and equal to its E4 row by sha256 of the file and of the reconstruction."""
     unit = e6.data["pages"][0]["unit"]
-    largest = min(e5.data["analysis"]["complexity"]["fragments"], key=lambda f: (-f["mgm"], f["unit"]))["unit"]
+    largest = extreme_fragments(e5.data["analysis"]["complexity"]["fragments"])[1]["unit"]
     if unit != largest:
         raise RunRefusal(f"the first page of E6 is {unit}, the fragment with the largest MGM of E5 is {largest}")
-    original = load_fragment(paths, unit)
+    original = arrays[unit]
     if original.dtype != np.uint8 or original.shape != (FRAGMENT, FRAGMENT):
         raise RunRefusal(f"{unit}: {original.dtype} {original.shape}, uint8 {FRAGMENT} x {FRAGMENT} is expected")
     a = e5.data["analysis"]
@@ -458,47 +664,67 @@ def comparison(e4, e5, e6, paths, work, log):
         if recon.dtype != np.uint8 or recon.shape != original.shape:
             raise RunRefusal(f"{unit}, {c}: the reconstruction is {recon.dtype} {recon.shape}, not that of the original")
         panels.append({"codec": c, "i": i, "unit": u, "row": row, "recon": recon})
-        log(f"  Fig. 3: {unit}, {c} PCC {u['pcc']} encoded again - file and reconstruction equal to E4 by sha256")
+        log(f"  Fig. 4: {unit}, {c} PCC {u['pcc']} encoded again - file and reconstruction equal to E4 by sha256")
     return unit, original, panels
 
 
-def fig3(e5, e6, unit, original, panels, style, plt):
+def fig4(e5, e6, unit, original, recons, style, plt):
     """Upper row - the original and the four codecs at the threshold of 42 dB, the whole fragment; lower row - the same
-    region of every panel repeated ZOOM times (pixel repetition); the frame of the region on the upper row. 8-bit
-    levels as they are: grey RGB of the very values, no colour map, no interpolation, no stretch of levels."""
+    region of every panel repeated ZOOM times (pixel repetition); the frame of the region on the upper row. In the PNG
+    every panel is repeated fig4_scale times; the dpi follows."""
     from matplotlib.patches import Rectangle
 
+    p, f = style["page"], style["figures"]
     r, c, value, scores = region_of(original)
     b = original.shape[0] // BLOCKS
-    f = style["figures"]
-    fig, axes = plt.subplots(2, 1 + len(panels), figsize=size(style, "fig3"), constrained_layout=True)
-    series = [("Fig. 3 / fragment", cell(unit, "text", e6, "pages[0].unit"))]
-    data = [{"kind": "block", "fragment": unit, "row": k[0], "column": k[1], "mgm": v} for k, v in sorted(scores.items())]
+    k = f["fig4_scale"]
+    side, n = int(FRAGMENT * k), 1 + len(recons)
+    width_in = p["double_column_cm"] / 2.54
+    dpi = math.floor(n * side / (width_in - ((n - 1) * p["image_gap_pt"] + 2 * p["image_margin_pt"]) / 72))
+    canvas_w, gap, margin = round(width_in * dpi), points(p["image_gap_pt"], dpi), points(p["image_margin_pt"], dpi)
+    left = (canvas_w - n * side - (n - 1) * gap) // 2
+    top = margin + points(2 * 1.3 * p["font_size_pt"] + 4, dpi)  # two lines of the title and its pad
+    canvas = (canvas_w, top + 2 * side + gap + margin)
+    fig = plt.figure(figsize=(canvas[0] / dpi, canvas[1] / dpi), dpi=dpi)
+    series = [("Fig. 4 / fragment", cell(unit, "text", e6, "pages[0].unit"))]
+    data = [{"kind": "block", "fragment": unit, "row": q[0], "column": q[1], "mgm": v} for q, v in sorted(scores.items())]
     data.append({"kind": "region", "fragment": unit, "row": r, "column": c, "mgm": value, "block": b, "zoom": ZOOM})
-    titles = ["Original"]
-    for p in panels:
-        s, u, base = style["codecs"][p["codec"]], p["unit"], f"analysis.units[{p['i']}]"
+    titles = ["Original\n "]
+    for x in recons:
+        s, u, base = style["codecs"][x["codec"]], x["unit"], f"analysis.units[{x['i']}]"
         pcc, psnr, cr = (cell(u["pcc"], "d", e5, f"{base}.pcc"), cell(u["psnr_hvs_m_db"], ".2f", e5, f"{base}.psnr_hvs_m_db"),
                          cell(u["cr"], ".2f", e5, f"{base}.cr"))
-        titles.append(f"{s['label']}, PCC {pcc['value']}\nPSNR-HVS-M {psnr['value']} dB\nCR {cr['value']}")
-        series += [(f"Fig. 3 / {s['label']} / PCC", pcc), (f"Fig. 3 / {s['label']} / PSNR-HVS-M", psnr),
-                   (f"Fig. 3 / {s['label']} / CR", cr)]
-        data.append({"kind": "panel", "fragment": unit, "codec": p["codec"], "pcc": u["pcc"],
-                     "psnr_hvs_m_db": u["psnr_hvs_m_db"], "cr": u["cr"], "e4_file_sha256": p["row"]["file_sha256"],
-                     "e4_recon_sha256": p["row"]["recon_sha256"], "encoded_again_equal": 1})
-    for k, image in enumerate([original] + [p["recon"] for p in panels]):
+        titles.append(f"{s['label']}\nPCC {pcc['value']}, {psnr['value']} dB, CR {cr['value']}")
+        series += [(f"Fig. 4 / {s['label']} / PCC", pcc), (f"Fig. 4 / {s['label']} / PSNR-HVS-M", psnr),
+                   (f"Fig. 4 / {s['label']} / CR", cr)]
+        data.append({"kind": "panel", "fragment": unit, "codec": x["codec"], "pcc": u["pcc"],
+                     "psnr_hvs_m_db": u["psnr_hvs_m_db"], "cr": u["cr"], "e4_file_sha256": x["row"]["file_sha256"],
+                     "e4_recon_sha256": x["row"]["recon_sha256"], "encoded_again_equal": 1})
+    panels = []
+    for j, (name, image) in enumerate(zip(["original", *(x["codec"] for x in recons)], [original, *(x["recon"] for x in recons)])):
         part = image[r * b:(r + 1) * b, c * b:(c + 1) * b]
         zoomed = np.repeat(np.repeat(part, ZOOM, axis=0), ZOOM, axis=1)
-        for ax, shown in ((axes[0, k], image), (axes[1, k], zoomed)):
-            ax.imshow(np.stack([shown] * 3, axis=-1), interpolation="none")
-            ax.set_xticks([])
-            ax.set_yticks([])
-        axes[0, k].add_patch(Rectangle((c * b - 0.5, r * b - 0.5), b, b, fill=False, edgecolor=f["fig3_frame_color"],
-                                       linewidth=f["fig3_frame_width_pt"]))
-        axes[0, k].set_title(titles[k])
-    axes[0, 0].set_ylabel(f"{FRAGMENT} x {FRAGMENT}")
-    axes[1, 0].set_ylabel(f"{b} x {b}, zoom {ZOOM}")
-    return fig, data, series
+        x0 = left + j * (side + gap)
+        for row, (shown, y0) in enumerate(((image, top), (zoomed, top + side + gap))):
+            box = (x0, y0, side, side)
+            ax = pixel_axes(fig, box, canvas)
+            grey(ax, shown)
+            panels.append({"panel": f"{'upper' if row == 0 else 'lower'} {name}", "unit": unit, "array": shown, "box": box,
+                           "scale": k, "marks": row == 0})
+            if row == 0:
+                ax.add_patch(Rectangle((c * b - 0.5, r * b - 0.5), b, b, fill=False, edgecolor=f["fig4_frame_color"],
+                                       linewidth=f["fig4_frame_width_pt"], antialiased=False))
+                ax.set_title(titles[j], pad=3)
+    data += panel_rows(panels, dpi)
+    block, zoom = constant(str(b)), constant(str(ZOOM))
+    caption = joined("Fig. 4. The fragment ", ("fragment", cell(unit, "text", e6, "pages[0].unit")), " with the largest MGM (",
+                     fragment_cells(e5, unit, "largest")[1], ") before (Original) and after compression by "
+                     f"{', '.join(style['codecs'][x]['label'] for x in CODECS[:-1])} and {style['codecs'][CODECS[-1]]['label']}"
+                     " at the threshold PCC for T = ", ("T", threshold(e5, T_MAIN)), " dB (upper row) and its ",
+                     ("region width", block), " × ", ("region height", block), " pixel region with the largest MGM "
+                     "magnified ", ("zoom", zoom), " times by pixel repetition (lower row); above the panels - PCC, "
+                     "PSNR-HVS-M in dB and CR.")
+    return fig, data, series, dpi, panels, caption
 
 
 # ---------------------------------------------------------------- writing
@@ -532,45 +758,61 @@ def write_table(folder, n, head, rows, notes, index):
 
 
 def build(cache_root, papers_root, paths=None, style_file=STYLE_FILE, force=False, e4_pin=E4_SHA256, log=print):
-    """`paths` - the lab paths of run_e4.load_paths (data_root and the coders) for Fig. 3."""
+    """`paths` - the lab paths of run_e4.load_paths (data_root and the coders) for Fig. 1 and Fig. 4."""
     cache_root, out = Path(cache_root), Path(papers_root) / PAPER
     targets = [out / p for p in OUTPUTS]
     existing = [str(p.relative_to(out)) for p in targets if p.exists()]
     if existing and not force:
         raise RunRefusal(f"{len(existing)} files exist ({existing[:3]}...): --force overwrites them")
-    for name in (E4_FILE, E5_FILE, E6_FILE):
+    for name in (E4_FILE, E5_FILE, E6_FILE, TILES_FILE):
         if not (cache_root / name).is_file():
             raise RunRefusal(f"the run file {cache_root / name} does not exist")
     if sha256_file(cache_root / E4_FILE) != e4_pin:
         raise RunRefusal(f"{E4_FILE}: sha256 differs from the pinned {e4_pin}")
     style = tomllib.loads(Path(style_file).read_text(encoding="utf-8"))
-    e4, e5, e6 = (Source(name, cache_root / name) for name in (E4_FILE, E5_FILE, E6_FILE))
+    e4, e5, e6, tiles = (Source(name, cache_root / name) for name in (E4_FILE, E5_FILE, E6_FILE, TILES_FILE))
+    paths = paths or {}
+    _, picks = typical_fragments(e5.data["analysis"]["complexity"]["fragments"], FIG1_IMAGE, len(FIG1_LETTERS))
+    arrays = load_units(paths, list(dict.fromkeys([FIG1_IMAGE, *(x["unit"] for x in picks), e6.data["pages"][0]["unit"]])))
     work = Path(tempfile.mkdtemp(prefix="p001_figures_", dir=cache_root))
     try:
-        unit, original, panels = comparison(e4, e5, e6, paths or {}, work, log)
+        unit, original, recons = comparison(e4, e5, e6, arrays, paths, work, log)
     finally:
         shutil.rmtree(work, ignore_errors=True)
     (out / "figures").mkdir(parents=True, exist_ok=True)
     (out / "tables").mkdir(parents=True, exist_ok=True)
     plt, font = setup(style)
-    index = []
-    for n, (fig, data, series) in enumerate((fig1(e4, e5, style, plt), fig2(e5, style, plt),
-                                             fig3(e5, e6, unit, original, panels, style, plt)), 1):
+    index, captions = [], []
+    for n, (fig, data, series, dpi, panels, caption) in enumerate((
+            fig1(e5, tiles, arrays, style, plt), fig2(e4, e5, style, plt), fig3(e5, style, plt),
+            fig4(e5, e6, unit, original, recons, style, plt)), 1):
         fig.savefig(out / "figures" / f"fig{n}.pdf")
-        fig.savefig(out / "figures" / f"fig{n}.png", dpi=style["page"]["dpi"])
+        fig.savefig(out / "figures" / f"fig{n}.png", dpi=dpi)
+        width, height = (round(v * dpi) for v in fig.get_size_inches())
         plt.close(fig)
+        check_png(out / "figures" / f"fig{n}.png", panels)
         columns = list(dict.fromkeys(k for row in data for k in row))
         write_csv(out / "figures" / f"fig{n}.csv", [[row.get(k, "") for k in columns] for row in data], columns)
         index += [row for name, c in series for row in index_rows(name, c)]
-    for n, (head, rows, notes) in enumerate((table1(e4, style), table2(e5, style), table3(e5, style)), 1):
+        captions.append((f"Fig. {n}", caption))
+        log(f"  fig{n}.png: {dpi} dpi, {width} x {height} pixels ({width / dpi * 2.54:.2f} x {height / dpi * 2.54:.2f} cm)"
+            + (f"; image panels pixel for pixel: {len(panels)} - " + ", ".join(f"{q['panel']} x{q['scale']}" for q in panels)
+               if panels else ""))
+    for n, (head, rows, notes, title) in enumerate((table1(e4, style), table2(e5, style), table3(e5, style)), 1):
         write_table(out / "tables", n, head, rows, notes, index)
+        captions.append((f"Table {n}", title))
+    for name, c in captions:
+        index += index_rows(f"Caption {name}", c)
+    (out / "figures" / "captions.txt").write_text("\n\n".join(c["value"] for _, c in captions) + "\n", encoding="utf-8")
     write_csv(out / "tables" / "numbers_index.csv", [[i[k] for k in INDEX_COLUMNS] for i in index], INDEX_COLUMNS)
     r, c, value, _ = region_of(original)
-    log(f"Figures and tables written into {out}: {len(OUTPUTS)} files; numbers_index.csv - {len(index)} rows")
+    log(f"Figures, tables and captions written into {out}: {len(OUTPUTS)} files; numbers_index.csv - {len(index)} rows")
     log(f"Font: {font}{'' if font == style['page']['font'] else ' (the fallback: ' + style['page']['font'] + ' not found)'}")
-    log(f"Fig. 3: {unit}, region - block row {r}, column {c} of {BLOCKS} x {BLOCKS} (MGM {value:.6f}); encoded again and "
-        f"equal to E4: {len(panels)} of {len(CODECS)}")
-    log(f"Inputs: {E4_FILE} sha256 {e4.sha256}; {E5_FILE} sha256 {e5.sha256}; {E6_FILE} sha256 {e6.sha256}")
+    log(f"Fig. 1: {FIG1_IMAGE}, " + ", ".join(f"({letter}) {x['unit']} MGM {x['mgm']:.4f}" for letter, x in zip(FIG1_LETTERS, picks)))
+    log(f"Fig. 4: {unit}, region - block row {r}, column {c} of {BLOCKS} x {BLOCKS} (MGM {value:.6f}); encoded again and "
+        f"equal to E4: {len(recons)} of {len(CODECS)}")
+    log(f"Inputs: {E4_FILE} sha256 {e4.sha256}; {E5_FILE} sha256 {e5.sha256}; {E6_FILE} sha256 {e6.sha256}; "
+        f"{TILES_FILE} sha256 {tiles.sha256}")
     return out, index
 
 

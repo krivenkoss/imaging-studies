@@ -4,17 +4,19 @@
 [page]
 column_cm = 8.8         # one column of J. Electr. Eng. - measured on the samples (PAPER.md, 2026-10-27)
 double_column_cm = 18.1 # the full width of the text - the same measurement
-dpi = 600
+dpi = 600               # the plots; the image figures take the dpi at which their panels are whole multiples of pixels
 font = "Times New Roman"
 font_fallback = "DejaVu Serif"  # taken when the font is not installed; figures.py names the font it took
 font_size_pt = 8
 line_width_pt = 1.0
-marker_size_pt = 3.0    # small markers on the lines; markers alone and large markers are not allowed (owner, 2026-10-27)
+marker_size_pt = 2.5    # small markers on the lines; markers alone and large markers are not allowed (owner, 2026-10-27)
 markevery_max = 25      # at most this many markers on one line, evenly along it
+image_margin_pt = 2.0   # the image figures: the margin around the panels
+image_gap_pt = 4.0      # the image figures: the gap between the panels
 
 # colours of STUDY.md section 7 (Okabe-Ito; AVIF #CC79A7 - owner decision, cycle 12); a line style and a marker each
 [codecs.vtm]
-label = "VVC (VTM)"
+label = "VVC"           # "VVC" everywhere in the paper; VTM only as the implementation in Table 1 (owner, 2026-10-27)
 color = "#0072B2"
 line = "solid"
 marker = "o"
@@ -42,19 +44,22 @@ color = "#7F7F7F"       # the threshold lines and r = 1 are grey
 line_40 = "dotted"
 line_41 = "dashed"
 line_42 = "solid"
-unity_line = "dashed"   # r = 1 on Fig. 2 (b)
+unity_line = "dashed"   # r = 1 on Fig. 3 (b)
 
 [figures]
-fig1_width = "column"   # "column" or "double"
-fig1_height_cm = 6.5
-fig1_legend = "upper right"
-fig1_legend_columns = 2
-fig2_width = "column"
-fig2_height_cm = 10.0
-fig2_legend = "upper right"
-fig2_legend_columns = 2
-fig2_legend_headroom = 0.3   # the y axis of both panels goes higher by this share of its span - room for the legend
-fig3_width = "double"
-fig3_height_cm = 8.6
-fig3_frame_color = "#D55E00"  # the frame of the region on the upper row of Fig. 3
-fig3_frame_width_pt = 0.8
+fig1_fragment_scale = 2       # Fig. 1: in the PNG the image is 1 : 1, the fragments (b), (c) - repeated this many times
+fig1_grid_color = "#56B4E9"   # the frames of the grid of the image (a)
+fig1_grid_width_pt = 0.5
+fig1_mark_color = "#D55E00"   # the frames and letters of the fragments (b), (c) on (a)
+fig1_mark_width_pt = 1.0
+fig2_width = "double"         # "column" or "double"
+fig2_height_cm = 12.0
+fig2_legend_columns = 7       # one legend above the four panels
+fig3_width = "column"
+fig3_height_cm = 10.0
+fig3_legend = "upper right"
+fig3_legend_columns = 2
+fig3_legend_headroom = 0.3    # the y axis of both panels goes higher by this share of its span - room for the legend
+fig4_scale = 2                # Fig. 4: in the PNG every panel is repeated this many times (the region - ZOOM times more)
+fig4_frame_color = "#D55E00"  # the frame of the region on the upper row
+fig4_frame_width_pt = 0.8
