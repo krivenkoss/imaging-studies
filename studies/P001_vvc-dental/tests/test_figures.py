@@ -3,6 +3,8 @@ D10 and fragment, and a coder of the test's own - no pixel of the data, no real 
 
 - the files are created: four figures (PDF, PNG, CSV), the captions, three tables (.xlsx, .csv), the index; an existing
   file is refused without --force;
+- two builds into different folders write the same bytes of every file; no PDF has CreationDate or ModDate; every xlsx
+  has created, modified and every zip entry at 1980-01-01 00:00:00 and its cells equal its CSV (cycle 21);
 - the choice of fragments by the declared rules, ties included: Fig. 1 (b) - the fragment of D10 with MGM closest to
   the median MGM of all fragments, (c) - the owner's choice D10_r00_c02 (cycle 21): a code not in E5, of another image
   or equal to (b) is refused; Fig. 2 - the smallest and the largest MGM; the frames of the grid of Fig. 1 - by the
@@ -30,6 +32,7 @@ import json
 import math
 import re
 import statistics
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -239,6 +242,37 @@ def test_files_created_and_existing_files_need_force(fg, built):
     fg.build(built["cache"], built["papers"], paths={"cache_root": built["cache"]}, e4_pin=built["pin"], force=True,
              log=lambda *a: None)
     assert not list(built["cache"].glob("p001_figures_*"))  # the work folder of the coders is removed
+
+
+def test_two_builds_write_the_same_bytes_and_no_time_of_the_build(built, tmp_path):
+    from openpyxl import load_workbook
+
+    fg = built["fg"]
+    again, _ = fg.build(built["cache"], tmp_path / "again", paths={"cache_root": built["cache"]}, e4_pin=built["pin"],
+                        log=lambda *a: None)
+    digest = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()  # noqa: E731
+    first, second = ({name: digest(out / name) for name in fg.OUTPUTS} for out in (built["out"], again))
+    assert first == second and len(first) == 20
+    trim = lambda row: row[:max([k + 1 for k, v in enumerate(row) if v != ""], default=0)]  # noqa: E731
+    checked = {".pdf": 0, ".xlsx": 0}
+    for name in fg.OUTPUTS:
+        path = built["out"] / name
+        if path.suffix == ".pdf":
+            data = path.read_bytes()
+            assert b"/CreationDate" not in data and b"/ModDate" not in data, name
+        elif path.suffix == ".xlsx":
+            with zipfile.ZipFile(path) as book:
+                assert {entry.date_time for entry in book.infolist()} == {(1980, 1, 1, 0, 0, 0)}, name
+                core = book.read("docProps/core.xml").decode("utf-8")
+            assert sorted(re.findall(r"<dcterms:(created|modified)\b[^>]*>([^<]*)<", core)) == \
+                [("created", "1980-01-01T00:00:00Z"), ("modified", "1980-01-01T00:00:00Z")], name
+            cells = [trim(["" if v is None else v for v in row])
+                     for row in load_workbook(path).active.iter_rows(values_only=True)]
+            assert cells == [trim(row) for row in read_csv(path.with_suffix(".csv"))], name
+        else:
+            continue
+        checked[path.suffix] += 1
+    assert checked == {".pdf": 4, ".xlsx": 3}
 
 
 def test_fragment_choice_by_the_rules_with_ties(fg):

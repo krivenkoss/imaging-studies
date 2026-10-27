@@ -13,7 +13,9 @@ fragment and a fragment of the owner's choice; Fig. 4 - the original fragment an
 42 dB from reconstructions encoded again with the wrappers of E4 (the function of run_e6.py), each equal to its E4 row
 by sha256 of the file and of the reconstruction, otherwise a refusal in words. The PDF carries every raster as it is; in the PNG every image panel lies
 on whole pixels and takes an integer multiple of its pixels (pixel repetition, checked after writing) - the dpi
-follows from that and is printed. Medical images stay outside Git. A number is never typed by hand.
+follows from that and is printed. Medical images stay outside Git. A number is never typed by hand. No file carries the
+time of the build: the PDF has no CreationDate, the xlsx has FIXED_DATE in its properties and zip entries - two runs
+write the same bytes.
 """
 
 import argparse
@@ -66,6 +68,8 @@ CONTAINER = {"vtm": "HEIF (vvc1)", "jpeg": "JFIF", "heif": "HEIF (hvc1)", "avif"
 OUTPUTS = [f"figures/fig{k}.{ext}" for k in (1, 2, 3, 4) for ext in ("pdf", "png", "csv")] + ["figures/captions.txt"] + \
           [f"tables/table{k}.{ext}" for k in (1, 2, 3) for ext in ("xlsx", "csv")] + ["tables/numbers_index.csv"]
 INDEX_COLUMNS = ("id", "value", "file", "sha256", "key", "op", "format")
+PDF_METADATA = {"CreationDate": None}  # no time of the build in the PDF (owner, cycle 21)
+FIXED_DATE = (1980, 1, 1, 0, 0, 0)  # the xlsx: created, modified, every zip entry - the first zip date (owner, cycle 21)
 
 
 # ---------------------------------------------------------------- values as printed, with their source
@@ -783,7 +787,16 @@ def write_csv(path, rows, columns=None):
 
 
 def write_table(folder, n, head, rows, notes, index):
+    """The CSV and the xlsx of a table and its rows of the index. The xlsx carries no time of the build: openpyxl 3.1.5
+    cannot leave created and modified out (None fails to write) and wb.save sets modified to the save time, so the book
+    is written by ExcelWriter - the writer wb.save calls - with both at FIXED_DATE, and its zip is written again with
+    every entry at FIXED_DATE (owner's decision, cycle 21)."""
+    import datetime
+    import io
+    import zipfile
+
     from openpyxl import Workbook
+    from openpyxl.writer.excel import ExcelWriter
 
     printed = [list(head)] + [[c["value"] for c in r] for r in rows] + [[c["value"]] for c in notes]
     write_csv(folder / f"table{n}.csv", printed)
@@ -793,7 +806,13 @@ def write_table(folder, n, head, rows, notes, index):
     for r, line_ in enumerate(printed, start=1):
         for c, value in enumerate(line_, start=1):
             ws.cell(row=r, column=c, value=value)
-    wb.save(folder / f"table{n}.xlsx")
+    wb.properties.created = wb.properties.modified = datetime.datetime(*FIXED_DATE)
+    raw = io.BytesIO()
+    with zipfile.ZipFile(raw, "w", zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
+        ExcelWriter(wb, archive).save()
+    with zipfile.ZipFile(raw) as book, zipfile.ZipFile(folder / f"table{n}.xlsx", "w", zipfile.ZIP_DEFLATED) as out:
+        for entry in book.infolist():
+            out.writestr(zipfile.ZipInfo(entry.filename, FIXED_DATE), book.read(entry.filename), zipfile.ZIP_DEFLATED)
     for r, line_ in enumerate(rows, start=1):
         for k, c in enumerate(line_):
             index += index_rows(f"Table {n} / row {r} / {head[k]}", c)
@@ -832,10 +851,10 @@ def build(cache_root, papers_root, paths=None, style_file=STYLE_FILE, force=Fals
             fig4(e5, e6, unit, original, recons, style, plt)), 1):
         if n == 1:  # Fig. 1 has a layout of its own for the PDF: the three rasters of one height
             pdf = fig1(e5, tiles, arrays, style, plt, "pdf")[0]
-            pdf.savefig(out / "figures" / "fig1.pdf")
+            pdf.savefig(out / "figures" / "fig1.pdf", metadata=PDF_METADATA)
             plt.close(pdf)
         else:
-            fig.savefig(out / "figures" / f"fig{n}.pdf")
+            fig.savefig(out / "figures" / f"fig{n}.pdf", metadata=PDF_METADATA)
         fig.savefig(out / "figures" / f"fig{n}.png", dpi=dpi)
         width, height = (round(v * dpi) for v in fig.get_size_inches())
         plt.close(fig)
