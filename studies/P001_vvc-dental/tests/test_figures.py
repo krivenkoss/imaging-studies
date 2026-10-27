@@ -196,6 +196,14 @@ def built(fg, tmp_path, monkeypatch):
             "pin": pin, "arrays": arrays, "monkeypatch": monkeypatch}
 
 
+@pytest.fixture()
+def drawn(fg, tmp_path):
+    """The synthetic run files and arrays without a build - for the tests that draw a figure themselves."""
+    cache = tmp_path / "cache"
+    e4, e5, fragments, arrays = synthetic(cache)
+    return {"fg": fg, "cache": cache, "e4": e4, "e5": e5, "fragments": fragments, "arrays": arrays}
+
+
 def sources(built):
     fg, cache = built["fg"], built["cache"]
     return [fg.Source(name, cache / name) for name in ("cycles/13/e4_main.json", "cycles/17/e5_analysis.json",
@@ -243,7 +251,8 @@ def test_fragment_choice_by_the_rules_with_ties(fg):
         fg.typical_fragments(fragments, "D10", 4)
 
 
-def test_fig1_initial_data_by_the_rules(built):
+def test_fig1_initial_data_by_the_rules(drawn):
+    built = drawn
     fg = built["fg"]
     style = style_of(fg)
     e4, e5, e6, tiles = sources(built)
@@ -271,7 +280,8 @@ def test_fig1_initial_data_by_the_rules(built):
     plt.close(fig)
 
 
-def test_fig1_is_one_row_of_one_height_in_the_pdf_and_whole_multiples_in_the_png(built):
+def test_fig1_is_one_row_of_one_height_in_the_pdf_and_whole_multiples_in_the_png(drawn):
+    built = drawn
     fg = built["fg"]
     style = style_of(fg)
     _, e5, _, tiles = sources(built)
