@@ -55,7 +55,9 @@ e4_book = run_e4.e4_book
 COMMAND = "python studies/P001_vvc-dental/run_e5.py"
 QUESTION = ("E5, P001: даёт ли VVC больший CR, чем JPEG, HEIF и AVIF, в пороге PSNR-HVS-M — по пациентам, по правилу, "
             "объявленному до чисел?")
-CYCLE = 15
+CYCLE = 17  # cycle 15 first; cycle 17 - whole images at 40 and 41 dB with the interpolated CR of VVC (STUDY.md section 6)
+BASELINE_SHA256 = "be161b1e46b3d81c62c22c859ed4840b53f4e4d99b264a181070d7ab7e7dc16a"  # cycles/15/e5_analysis.json (A13)
+CHANGED = ("whole_ratios", "whole_comparisons")  # the only fields that may differ from cycle 15, at 40 and 41 dB
 RUN_FILE, BOOK_FILE = "e5_analysis.json", "e5_analysis.xlsx"
 E4_RUN_SHA256 = "44a1733512fdfbb9d02d210ff81d492b9a5d929ec8d547d84676d47350875f2a"  # cycles/13/e4_main.json (A12)
 THRESHOLDS = (40.0, 41.0, 42.0)
@@ -91,7 +93,9 @@ DECLARED = {
     "rule": RULE,
     "whole": ("Целые снимки — описательно: пороговый PCC по точкам прогона (у VVC — сетка и уточнение); при T = 40 и 41 "
               "дБ у VVC, где между двумя узлами сетки нет уточнения, — CR, линейно интерполированный по ln CR между "
-              "узлами, окружающими пересечение PSNR-HVS-M = T; r по снимку и B14 — описательно."),
+              "узлами, окружающими пересечение PSNR-HVS-M = T; r по снимку и B14 — описательно. Уточнение (решение "
+              "владельца 2026-10-26, с цикла 17): в r и B14 снимков при T = 40 и 41 дБ у VVC входит интерполированный "
+              "CR (где есть уточнение — значение в узле), r по узлу печатается рядом; в цикле 15 в r вошёл узловой."),
     "complexity": ("MGM (B13) — по исходному фрагменту и по целому снимку. Описательно: ρ Спирмена (scipy.stats.spearmanr) "
                    "MGM с пороговым PCC, ln CR при 42 дБ по кодекам и ln r трёх пар — по 154 фрагментам и по пациентам "
                    "(медианы, n = 16). Ожидание до чисел: чем сложнее фрагмент, тем меньше CR в пороге (Lukin et al., "
@@ -406,9 +410,17 @@ def analyse(e4, levels, image_of, arrays, frisco, scale_folder):
     ratios = ratios_table(medians, images, "пациенты")
     comparisons = compare(ratios, "пациенты")
     whole = [u for u in units if u["level"] == "m"]
-    whole_medians = {(u["image"], u["codec"], u["t_db"]): u["cr"] for u in whole if u["judged"]}
+    # whole images: VVC at 40 and 41 dB enters r with its interpolated CR where there is one (cycle 17), else the node
+    whole_medians = {(u["image"], u["codec"], u["t_db"]):
+                     (u["cr_interp"] if u["codec"] == "vtm" and u["cr_interp"] is not None else u["cr"])
+                     for u in whole if u["judged"]}
     whole_medians |= {(u["image"], JPEG_OPT, u["t_db"]): u["cr_opt"] for u in whole if u["judged"] and u["codec"] == "jpeg"}
     whole_ratios = ratios_table(whole_medians, images, "снимки")
+    node = {(u["image"], u["t_db"]): u["cr"] for u in whole if u["judged"] and u["codec"] == "vtm"}
+    for x in whole_ratios:
+        if x["t_db"] != MAIN_T:  # the r of the node beside it
+            x["r_node"] = node[(x["image"], x["t_db"])] / whole_medians[(x["image"], x["pair"].split("/")[1],
+                                                                         x["t_db"])] if x["in_test"] else None
     whole_comparisons = compare(whole_ratios, "снимки")
     fragments, patient_complexity, rhos, expectation = complexity_tables(units, mgm, images, ratios)
     scale = fidler_scale(scale_folder, frisco)
@@ -490,6 +502,7 @@ PATIENT_COLUMNS = (("Снимок", "image"), ("Кодек", "codec"), ("T, дБ
                    ("Медиана CR в пороге, безразм.", "median_cr"))
 RATIO_COLUMNS = (("Снимок", "image"), ("Пара", "pair"), ("T, дБ", "t_db"), ("r, раз", "r"), ("ln r", "ln_r"),
                  ("В тесте", "in_test"), ("Причина", "reason"))
+WHOLE_RATIO_COLUMNS = RATIO_COLUMNS + (("r по узлу VVC (40 и 41 дБ), раз", "r_node"),)
 COUNT_COLUMNS = (("Уровень", "level"), ("Кодек", "codec"), ("T, дБ", "t_db"), ("Судимо, шт", "judged"), ("Из, шт", "of"),
                  ("Причины остальных", "reasons"))
 FRAGMENT_COLUMNS = (("Единица", "unit"), ("Снимок", "image"), ("MGM, безразм.", "mgm"),
@@ -567,7 +580,7 @@ def book_cells(record, run_sha256):
     put_table(cells, "JPEG Хаффман", 9, 1, HUFF_COLUMNS, h["rows"])
     whole = [u for u in a["units"] if u["level"] == "m"]
     put_table(cells, "Снимки", 1, 1, UNIT_COLUMNS, whole)
-    put_table(cells, "Снимки", 1, len(UNIT_COLUMNS) + 2, RATIO_COLUMNS, a["whole_ratios"])
+    put_table(cells, "Снимки", 1, len(UNIT_COLUMNS) + 2, WHOLE_RATIO_COLUMNS, a["whole_ratios"])
     put_table(cells, "Снимки", 3 + len(a["whole_ratios"]) + 2, len(UNIT_COLUMNS) + 2, COMPARE_COLUMNS, a["whole_comparisons"])
     return cells, where
 
@@ -672,8 +685,41 @@ def summary_lines(record):
     return out
 
 
+_MISSING = object()
+
+
+def regression(analysis, baseline):
+    """Paths of the fields of `analysis` that differ from the analysis of cycle 15; one outside whole_ratios and
+    whole_comparisons at 40 and 41 dB is a refusal in words (the regression declared for cycle 17)."""
+    new, found = json.loads(json.dumps(e4_book.jsonable(analysis), ensure_ascii=False)), []
+
+    def walk(a, b, path):
+        if isinstance(a, dict) and isinstance(b, dict):
+            for k in sorted(set(a) | set(b)):
+                walk(a.get(k, _MISSING), b.get(k, _MISSING), f"{path}.{k}" if path else k)
+        elif isinstance(a, list) and isinstance(b, list) and len(a) == len(b):
+            for i, (x, y) in enumerate(zip(a, b)):
+                walk(x, y, f"{path}[{i}]")
+        elif a is _MISSING or b is _MISSING or a != b:
+            found.append(path)
+
+    def allowed(path):
+        head, sep, rest = path.partition("[")
+        if head not in CHANGED or not sep:
+            return False
+        i = int(rest.split("]", 1)[0])
+        return new[head][i]["t_db"] in (40.0, 41.0) and baseline[head][i]["t_db"] in (40.0, 41.0)
+
+    walk(new, baseline, "")
+    other = [p for p in found if not allowed(p)]
+    if other:
+        raise RunRefusal(f"E5 differs from cycle 15 outside {' and '.join(CHANGED)} at 40 and 41 dB in {len(other)} "
+                         f"fields: {other[:8]}")
+    return found
+
+
 def run(e4_path, data_root, tiles_path, images_root, scale_folder, out_dir, state, e4_pin=E4_RUN_SHA256,
-        registry_pins=(run_e4.REGISTRY_SHA256, run_e4.TILES_SHA256), log=print):
+        registry_pins=(run_e4.REGISTRY_SHA256, run_e4.TILES_SHA256), log=print, baseline=None):
     out_dir = Path(out_dir)
     run_path, book_path = out_dir / RUN_FILE, out_dir / BOOK_FILE
     for path in (run_path, book_path):
@@ -703,6 +749,15 @@ def run(e4_path, data_root, tiles_path, images_root, scale_folder, out_dir, stat
     arrays = {u: np.ascontiguousarray(i["array"]) for u, i in units.items()}
     log("  E4 rows, the copy and the grid read; re-encoding JPEG with optimize=True, MGM, analysis")
     analysis = analyse(e4, levels, image_of, arrays, frisco["array"], scale_folder)
+    checked = None
+    if baseline is not None:  # (run file of cycle 15, its pinned sha256)
+        if not Path(baseline[0]).is_file() or sha256_file(baseline[0]) != baseline[1]:
+            raise RunRefusal(f"the run file of cycle 15 {baseline[0]} is missing or its sha256 is not {baseline[1]}")
+        differences = regression(analysis, json.loads(Path(baseline[0]).read_text(encoding="utf-8"))["analysis"])
+        checked = {"baseline": "cycles/15/e5_analysis.json", "baseline_sha256": baseline[1], "differences": differences,
+                   "rule": "равны все поля analysis, кроме whole_ratios и whole_comparisons при t_db 40 и 41"}
+        log(f"  regression against cycle 15: {len(differences)} fields differ, all in whole_ratios and "
+            "whole_comparisons at 40 and 41 dB")
     record = {"run": RUN_FILE, "study": "P001", "cycle": CYCLE, "question": QUESTION, "command": COMMAND,
               "started_utc": started.isoformat(timespec="seconds"),
               "finished_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"), **state,
@@ -713,7 +768,7 @@ def run(e4_path, data_root, tiles_path, images_root, scale_folder, out_dir, stat
               "environment": {"python": platform.python_version(), "imstudies": imstudies.__version__,
                               "numpy": np.__version__, "scipy": scipy.__version__, "pillow": PIL.__version__,
                               **{f"jpeg_{k}": v for k, v in jpeg.versions().items()}},
-              "machine": e4_book.machine(), "analysis": analysis}
+              "machine": e4_book.machine(), "analysis": analysis, "regression": checked}
     record["description"] = description(record)
     record["summary_lines"] = summary_lines(record)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -739,7 +794,7 @@ def main(argv=None):
         cycles = paths["cache_root"] / "cycles"
         run(cycles / "13" / run_e4.RUN_FILE, paths["data_root"], cycles / "9" / "p001_tiles.json",
             (ROOT / raw["images_root"]).resolve(), paths["cache_root"].parent / "fidler_scale", cycles / str(CYCLE),
-            git_state(ROOT))
+            git_state(ROOT), baseline=(cycles / "15" / RUN_FILE, BASELINE_SHA256))
     except RunRefusal as refusal:
         print(f"REFUSED: {refusal}", file=sys.stderr)
         return 2

@@ -10,7 +10,10 @@
   reconstruction is refused in words;
 - end to end: a synthetic copy of 8 "patients" (one image and two fragments each), an E4 run file with real JPEG
   rows and given VVC, HEIF, AVIF curves, a stand-in IrfanView file -> the run file and the book, checked cell by
-  cell; VVC better than JPEG and HEIF by the rule, not established against AVIF; privacy - codes only, no pixels.
+  cell; VVC better than JPEG and HEIF by the rule, not established against AVIF; privacy - codes only, no pixels;
+- whole images at 40 and 41 dB (cycle 17): the crossing between grid nodes without refinement - r takes the
+  interpolated CR of VVC and the r of the node is printed beside it; a refined image - the node; at 42 dB nothing
+  new; the regression against cycle 15 lets only those fields differ.
 """
 
 import hashlib
@@ -157,6 +160,8 @@ def curve_rows(unit, level, codec, k, arrays):
     rows = []
     if codec == "vtm":
         qps = range(-12, 61, 4) if level == "m" else range(20, 41)
+        if unit == "D03":  # a whole image refined around its crossing of 40 dB: the node, not an interpolation
+            qps = sorted([*qps, 21, 22, 23])
         for q in qps:
             hvs = 60.0 - 0.6 * (q + 12) if level == "m" else 50.0 - 0.8 * (q - 20)
             if unit == "D01_r00_c00" and q == 31:
@@ -301,3 +306,35 @@ def test_another_e4_run_file_is_refused(e5, world):
     with pytest.raises(e5.RunRefusal, match="E5 is declared for " + "0" * 64):
         e5.run(world["e4"], world["data"], world["grid"], world["images"], world["fidler"], world["out"],
                {"core_commit": "test", "core_tree": "test"}, e4_pin="0" * 64, registry_pins=world["pins"])
+
+
+def test_whole_images_at_40_and_41_take_the_interpolated_cr(e5, world):
+    run_path, _ = run_world(e5, world)
+    a = json.loads(run_path.read_text(encoding="utf-8"))["analysis"]
+    unit = {(u["unit"], u["codec"], u["t_db"]): u for u in a["units"]}
+    ratio = {(x["image"], x["pair"], x["t_db"]): x for x in a["whole_ratios"]}
+    for t in (40.0, 41.0):
+        vvc, jpeg = unit[("D02", "vtm", t)], unit[("D02", "jpeg", t)]
+        assert vvc["cr_interp"] is not None and vvc["cr_interp"] != vvc["cr"]  # between grid nodes, no refinement
+        x = ratio[("D02", "vtm/jpeg", t)]
+        assert x["r"] == pytest.approx(vvc["cr_interp"] / jpeg["cr"], rel=1e-12)
+        assert x["r_node"] == pytest.approx(vvc["cr"] / jpeg["cr"], rel=1e-12)
+    refined, jpeg = unit[("D03", "vtm", 40.0)], unit[("D03", "jpeg", 40.0)]
+    assert refined["cr_interp"] is None and refined["pcc"] == 21  # QP 21 >= 40 dB, 22 below: the node
+    assert ratio[("D03", "vtm/jpeg", 40.0)]["r"] == pytest.approx(refined["cr"] / jpeg["cr"], rel=1e-12)
+    assert all("r_node" not in x for x in a["whole_ratios"] if x["t_db"] == 42.0)
+
+
+def test_regression_lets_only_whole_images_at_40_and_41_differ(e5, world):
+    run_path, _ = run_world(e5, world)
+    analysis = json.loads(run_path.read_text(encoding="utf-8"))["analysis"]
+    baseline = json.loads(json.dumps(analysis))
+    i40 = next(i for i, x in enumerate(baseline["whole_ratios"]) if x["t_db"] == 40.0 and x["in_test"])
+    baseline["whole_ratios"][i40]["r"] *= 1.01
+    del baseline["whole_ratios"][i40]["r_node"]
+    assert e5.regression(analysis, baseline) == [f"whole_ratios[{i40}].r", f"whole_ratios[{i40}].r_node"]
+    i42 = next(i for i, x in enumerate(baseline["whole_ratios"]) if x["t_db"] == 42.0 and x["in_test"])
+    baseline["whole_ratios"][i42]["r"] *= 1.01
+    baseline["comparisons"][0]["p"] = 0.5
+    with pytest.raises(e5.RunRefusal, match=r"in 2 fields: \['comparisons\[0\]\.p', 'whole_ratios\[\d+\]\.r'\]"):
+        e5.regression(analysis, baseline)
