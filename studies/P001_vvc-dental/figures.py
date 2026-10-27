@@ -8,10 +8,10 @@ and tables/numbers_index.csv - every number of every table cell, figure series a
 the run file (relative to cache_root), its sha256, the key in the file, the operation and the format (the source of
 NUMBERS.md). The composition is the one declared in the task of cycle 19; all text is English with a decimal point;
 the codec is "VVC" (VTM only as the implementation in Table 1); lines of different colour and style carry small
-markers (STUDY.md section 7). Images: Fig. 1 - the image D10 of the copy data/P001 with its grid (B11) and two typical
-fragments; Fig. 4 - the original fragment and the four codecs at the threshold of 42 dB from reconstructions encoded
-again with the wrappers of E4 (the function of run_e6.py), each equal to its E4 row by sha256 of the file and of the
-reconstruction, otherwise a refusal in words. The PDF carries every raster as it is; in the PNG every image panel lies
+markers (STUDY.md section 7). Images: Fig. 1 - the image D10 of the copy data/P001 with its grid (B11), a typical
+fragment and a fragment of the owner's choice; Fig. 4 - the original fragment and the four codecs at the threshold of
+42 dB from reconstructions encoded again with the wrappers of E4 (the function of run_e6.py), each equal to its E4 row
+by sha256 of the file and of the reconstruction, otherwise a refusal in words. The PDF carries every raster as it is; in the PNG every image panel lies
 on whole pixels and takes an integer multiple of its pixels (pixel repetition, checked after writing) - the dpi
 follows from that and is printed. Medical images stay outside Git. A number is never typed by hand.
 """
@@ -46,7 +46,9 @@ CODECS = ("vtm", "jpeg", "heif", "avif")
 OTHERS = ("jpeg", "heif", "avif")
 T_MAIN = 42.0
 FIG1_IMAGE = "D10"  # the image of Fig. 1 - the owner's choice (task of cycle 19)
-FIG1_LETTERS = "bc"  # its fragments with MGM closest to the median MGM of all fragments, one per letter
+FIG1_LETTERS = "bc"  # its fragments: (b) - MGM closest to the median MGM of all fragments, (c) - FIG1_C
+FIG1_C = "D10_r00_c02"  # Fig. 1 (c) - owner's choice, cycle 21: for the demonstration, not by a rule
+FIG1_C_PLACE = "from the upper middle part of the image"  # where (c) lies - the words of the caption (task of cycle 21)
 FRAGMENT = 512  # Fig. 4: the whole fragment in the upper row
 BLOCKS = 4      # Fig. 4: the region is a block of the BLOCKS x BLOCKS grid of the fragment (128 x 128)
 ZOOM = 4        # Fig. 4: the lower row - the region repeated ZOOM times along each axis, no interpolation
@@ -179,6 +181,21 @@ def typical_fragments(fragments, image, n):
     if len(mine) < n:
         raise RunRefusal(f"{image} has {len(mine)} fragments in E5, {n} are needed")
     return median, mine[:n]
+
+
+def fig1_fragments(fragments):
+    """Fig. 1: (b) - the fragment of FIG1_IMAGE by the rule of typical_fragments, (c) - FIG1_C; (the median, [(b), (c)]).
+    (c) not in E5 once, of another image or the same as (b) - a refusal."""
+    median, (typical,) = typical_fragments(fragments, FIG1_IMAGE, 1)
+    found = pick(fragments, unit=FIG1_C)
+    if len(found) != 1:
+        raise RunRefusal(f"Fig. 1 (c): {FIG1_C} is found {len(found)} times in analysis.complexity.fragments of E5, "
+                         "once is expected")
+    if found[0]["image"] != FIG1_IMAGE:
+        raise RunRefusal(f"Fig. 1 (c): {FIG1_C} is a fragment of {found[0]['image']}, not of {FIG1_IMAGE}")
+    if found[0]["unit"] == typical["unit"]:
+        raise RunRefusal(f"Fig. 1 (c): {FIG1_C} is the fragment (b) by the rule as well")
+    return median, [typical, found[0]]
 
 
 def extreme_fragments(fragments):
@@ -473,14 +490,14 @@ def fig1_layout(width, height, side, style):
 
 def fig1(e5, tiles, arrays, style, plt, target):
     """One row: (a) the whole image with the grid of its fragments (B11), the frames of (b) and (c) marked and lettered;
-    (b), (c) - its fragments with MGM closest to the median MGM of all fragments; the letters of the panels below the
-    row. `target` - "png": the image 1 : 1 and the fragments repeated fig1_fragment_scale times on whole pixels;
-    "pdf": the three rasters of one height (fig1_layout)."""
+    (b), (c) - its fragments of fig1_fragments; the letters of the panels below the row. `target` - "png": the image
+    1 : 1 and the fragments repeated fig1_fragment_scale times on whole pixels; "pdf": the three rasters of one height
+    (fig1_layout)."""
     from matplotlib.patches import Rectangle
 
     p, f = style["page"], style["figures"]
     fragments = e5.data["analysis"]["complexity"]["fragments"]
-    median, picks = typical_fragments(fragments, FIG1_IMAGE, len(FIG1_LETTERS))
+    median, picks = fig1_fragments(fragments)
     tile, grid = tiles.data["parameters"]["tile"], [r for r in tiles.data["rows"] if r["code"] == FIG1_IMAGE]
     whole = arrays[FIG1_IMAGE]
     height, width = whole.shape
@@ -529,9 +546,10 @@ def fig1(e5, tiles, arrays, style, plt, target):
              [(f"Fig. 1 / {name}", c) for pair in chosen for name, c in pair]
     caption = joined("Fig. 1. The dental image ", ("image", constant(FIG1_IMAGE)), " with the grid of its ",
                      ("fragment width", size_cell), " × ", ("fragment height", size_cell),
-                     " pixel fragments (a) and its two fragments with MGM closest to the median MGM of the ",
-                     ("fragments", count_cell), " fragments (", ("median MGM", median_cell), "): ",
-                     chosen[0][0], ", MGM = ", chosen[0][1], " (b) and ", chosen[1][0], ", MGM = ", chosen[1][1], " (c).")
+                     " pixel fragments (a); its fragment with MGM closest to the median MGM of the ",
+                     ("fragments", count_cell), " fragments (", ("median MGM", median_cell), "), ",
+                     chosen[0][0], ", MGM = ", chosen[0][1], " (b); and the fragment ", FIG1_C_PLACE, ", ",
+                     chosen[1][0], ", MGM = ", chosen[1][1], " (c).")
     return fig, data, series, dpi, panels, caption
 
 
@@ -798,7 +816,7 @@ def build(cache_root, papers_root, paths=None, style_file=STYLE_FILE, force=Fals
     style = tomllib.loads(Path(style_file).read_text(encoding="utf-8"))
     e4, e5, e6, tiles = (Source(name, cache_root / name) for name in (E4_FILE, E5_FILE, E6_FILE, TILES_FILE))
     paths = paths or {}
-    _, picks = typical_fragments(e5.data["analysis"]["complexity"]["fragments"], FIG1_IMAGE, len(FIG1_LETTERS))
+    _, picks = fig1_fragments(e5.data["analysis"]["complexity"]["fragments"])
     arrays = load_units(paths, list(dict.fromkeys([FIG1_IMAGE, *(x["unit"] for x in picks), e6.data["pages"][0]["unit"]])))
     work = Path(tempfile.mkdtemp(prefix="p001_figures_", dir=cache_root))
     try:

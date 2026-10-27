@@ -3,8 +3,9 @@ D10 and fragment, and a coder of the test's own - no pixel of the data, no real 
 
 - the files are created: four figures (PDF, PNG, CSV), the captions, three tables (.xlsx, .csv), the index; an existing
   file is refused without --force;
-- the choice of fragments by the declared rules, ties included: Fig. 1 - the two fragments of D10 with MGM closest to
-  the median MGM of all fragments; Fig. 2 - the smallest and the largest MGM; the frames of the grid of Fig. 1 - by the
+- the choice of fragments by the declared rules, ties included: Fig. 1 (b) - the fragment of D10 with MGM closest to
+  the median MGM of all fragments, (c) - the owner's choice D10_r00_c02 (cycle 21): a code not in E5, of another image
+  or equal to (b) is refused; Fig. 2 - the smallest and the largest MGM; the frames of the grid of Fig. 1 - by the
   formula of B11;
 - the CSV of every figure equals the data of the run files; the series of Fig. 2 carry the data of their own codec;
 - every series of the plots is a line with markers: the marker size equals the style, is 2.5 pt and at most 4 pt, at
@@ -46,8 +47,11 @@ CHOSEN = "D08_r00_c04"  # the largest MGM of the synthetic fragments (ties with 
 SIMPLEST = "D01_r00_c00"  # the smallest MGM (ties with D09_r00_c00 - the smaller code)
 THRESHOLD_PCC = {"vtm": 31, "jpeg": 67, "heif": 67, "avif": 67}  # the 12th point of every codec below
 D10_SHAPE = (1100, 2100)  # H, W of the synthetic D10: a grid of 2 x 4 fragments
-D10_MGM = (0.030, 0.035, 0.0405, 0.0437, 0.046, 0.050, 0.052, 0.055)  # its fragments r00_c00 ... r01_c03; the median
-# of all fragments (0.041) is none of them, so a caption that prints the MGM of a fragment for the median is seen
+D10_MGM = (0.030, 0.035, 0.046, 0.050, 0.0437, 0.052, 0.055, 0.0405)  # its fragments r00_c00 ... r01_c03; the median
+# of all fragments (0.041) is none of them, so a caption that prints the MGM of a fragment for the median is seen; by
+# the rule (b) is r01_c03 and the next one r01_c00, the owner's (c) r00_c02 is the third - a rule in place of the
+# owner's choice is seen
+OWNER_C = "D10_r00_c02"  # Fig. 1 (c): the owner's choice, task of cycle 21
 
 
 @pytest.fixture(scope="module")
@@ -220,9 +224,10 @@ def read_csv(path):
 
 
 def typical_by_rule(fragments):
+    """(the median, [(b) - the MGM closest to the median, (c) - the owner's choice], the next one by the rule)."""
     median = statistics.median(f["mgm"] for f in fragments)
     ranked = sorted((abs(f["mgm"] - median), f["unit"]) for f in fragments if f["image"] == "D10")
-    return median, [u for _, u in ranked[:2]]
+    return median, [ranked[0][1], OWNER_C], ranked[1][1]
 
 
 def test_files_created_and_existing_files_need_force(fg, built):
@@ -256,7 +261,8 @@ def test_fig1_initial_data_by_the_rules(drawn):
     fg = built["fg"]
     style = style_of(fg)
     e4, e5, e6, tiles = sources(built)
-    median, want = typical_by_rule(built["fragments"])
+    median, want, next_by_rule = typical_by_rule(built["fragments"])
+    assert len({want[0], want[1], next_by_rule}) == 3  # the synthetic data tell the owner's (c) from the rule
     plt, _ = fg.setup(style)
     fig, data, series, dpi, panels, caption = fg.fig1(e5, tiles, built["arrays"], style, plt, "png")
     a, b, c = fig.axes
@@ -267,6 +273,8 @@ def test_fig1_initial_data_by_the_rules(drawn):
     marked = sorted((f[0], f[1]) for f in frames if tuple(f[4]) == mark)
     assert marked == sorted(grid[u] for u in want)
     assert sorted(t.get_text() for t in a.texts) == ["b", "c"]
+    inside = lambda px, py: [u for u, (x, y) in grid.items() if x <= px < x + 512 and y <= py < y + 512]  # noqa: E731
+    assert {t.get_text(): inside(*t.get_position()) for t in a.texts} == {"b": [want[0]], "c": [want[1]]}
     for ax, unit in ((b, want[0]), (c, want[1])):
         (shown,) = ax.get_images()
         x, y = grid[unit]
@@ -276,8 +284,27 @@ def test_fig1_initial_data_by_the_rules(drawn):
     rows = [r for r in data if r.get("kind") == "tile"]
     assert {r["unit"]: r["panel"] for r in rows if r["panel"]} == {want[0]: "b", want[1]: "c"}
     assert [r["mgm"] for r in data if r.get("kind") == "median MGM"] == [median]
-    assert want[0] in caption["value"] and want[1] in caption["value"] and f"{median:.4f}" in caption["value"]
+    mgm = {f["unit"]: f["mgm"] for f in built["fragments"]}
+    assert caption["value"] == (
+        "Fig. 1. The dental image D10 with the grid of its 512 × 512 pixel fragments (a); its fragment with MGM closest "
+        f"to the median MGM of the {len(built['fragments'])} fragments ({median:.4f}), {want[0]}, MGM = "
+        f"{mgm[want[0]]:.4f} (b); and the fragment from the upper middle part of the image, {OWNER_C}, MGM = "
+        f"{mgm[OWNER_C]:.4f} (c).")
     plt.close(fig)
+
+
+def test_fig1_c_is_the_owners_choice_and_a_wrong_code_is_refused(drawn, monkeypatch):
+    fg, fragments = drawn["fg"], drawn["fragments"]
+    median, want, _ = typical_by_rule(fragments)
+    assert fg.FIG1_C == OWNER_C
+    got, picks = fg.fig1_fragments(fragments)
+    assert got == median and [x["unit"] for x in picks] == want
+    for code, reason in (("D10_r02_c00", "D10_r02_c00 is found 0 times in analysis.complexity.fragments of E5"),
+                         ("D02_r00_c03", "D02_r00_c03 is a fragment of D02, not of D10"),
+                         (want[0], f"{want[0]} is the fragment (b) by the rule as well")):
+        monkeypatch.setattr(fg, "FIG1_C", code)
+        with pytest.raises(fg.RunRefusal, match=re.escape(f"Fig. 1 (c): {reason}")):
+            fg.fig1_fragments(fragments)
 
 
 def test_fig1_is_one_row_of_one_height_in_the_pdf_and_whole_multiples_in_the_png(drawn):
@@ -500,7 +527,7 @@ def test_png_image_panels_are_whole_multiples_pixel_for_pixel(built):
     recon = {k: fake_coder(k, original, THRESHOLD_PCC[k])[1] for k in CODECS}
     grid = b11_grid(*D10_SHAPE)
     whole = built["arrays"]["D10"]
-    _, want = typical_by_rule(built["fragments"])
+    _, want, _ = typical_by_rule(built["fragments"])
     crop = {u: whole[grid[u][1]:grid[u][1] + 512, grid[u][0]:grid[u][0] + 512] for u in want}
     expected = {("fig1", "a"): (whole, True), ("fig1", "b"): (crop[want[0]], False), ("fig1", "c"): (crop[want[1]], False),
                 ("fig4", "upper original"): (original, True), ("fig4", "lower original"): (region(original), False)}
