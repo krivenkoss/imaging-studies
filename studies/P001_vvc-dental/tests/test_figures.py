@@ -46,7 +46,8 @@ CHOSEN = "D08_r00_c04"  # the largest MGM of the synthetic fragments (ties with 
 SIMPLEST = "D01_r00_c00"  # the smallest MGM (ties with D09_r00_c00 - the smaller code)
 THRESHOLD_PCC = {"vtm": 31, "jpeg": 67, "heif": 67, "avif": 67}  # the 12th point of every codec below
 D10_SHAPE = (1100, 2100)  # H, W of the synthetic D10: a grid of 2 x 4 fragments
-D10_MGM = (0.030, 0.035, 0.041, 0.0435, 0.046, 0.050, 0.052, 0.055)  # its fragments r00_c00 ... r01_c03
+D10_MGM = (0.030, 0.035, 0.0405, 0.0437, 0.046, 0.050, 0.052, 0.055)  # its fragments r00_c00 ... r01_c03; the median
+# of all fragments (0.041) is none of them, so a caption that prints the MGM of a fragment for the median is seen
 
 
 @pytest.fixture(scope="module")
