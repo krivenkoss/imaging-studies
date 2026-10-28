@@ -1,27 +1,30 @@
 """Lab tests of figures.py (paper P001, cycle 19) on synthetic run files of E4, E5, E6 and the grid, a synthetic image
 D10 and fragment, and a coder of the test's own - no pixel of the data, no real number.
 
-- the files are created: seven figures (PDF, PNG, CSV), the captions, three tables (.xlsx, .csv), the index; an existing
-  file is refused without --force; the figures are numbered in the order of their mention (cycle 22): the former Fig. 3
-  and Fig. 4 are Fig. 6 and Fig. 7 with their captions and index rows;
+- the files are created: eight figures (PDF, PNG, CSV), the captions, three tables (.xlsx, .csv), the index; an existing
+  file is refused without --force; the figures are numbered in the order of their mention (cycles 22, 25): Fig. 2 is
+  the fragments of the plots, the former Fig. 2 to Fig. 7 are Fig. 3 to Fig. 8 with their captions and index rows;
 - two builds into different folders write the same bytes of every file; no PDF has CreationDate or ModDate; every xlsx
   has created, modified and every zip entry at 1980-01-01 00:00:00 and its cells equal its CSV (cycle 21);
 - the choice of fragments by the declared rules, ties included: Fig. 1 (b) - the fragment of D10 with MGM closest to
   the median MGM of all fragments, (c) - the owner's choice D10_r00_c02 (cycle 21): a code not in E5, of another image
-  or equal to (b) is refused; Fig. 2 - the smallest and the largest MGM; the frames of the grid of Fig. 1 - by the
-  formula of B11;
-- the CSV of every figure equals the data of the run files; the series of Fig. 2 carry the data of their own codec;
+  or equal to (b) is refused; the plots of Fig. 3 and Fig. 4 - the smallest and the largest MGM; the frames of the grid
+  of Fig. 1 - by the formula of B11;
+- Fig. 2 (cycle 25): (a), (b) - the codes of the simple and the complex fragment of the plots of Fig. 3 and Fig. 4, the
+  pixels of the loader (the grid) without interpolation, one row, the letters below the row and not over the images;
+- the CSV of every figure equals the data of the run files; the series of Fig. 3 carry the data of their own codec;
+  Fig. 3 has six panels, (e), (f) - HaarPSI of E4 on CR without threshold lines (cycle 25);
 - every series of the plots is a line with markers: the marker size equals the style, is 2.5 pt and at most 4 pt, at
   most markevery_max markers on a line; every series, threshold line and r = 1 has a legend entry; the labels of the
   logarithmic axes carry no "x 10^n"; an axis label with PCC has no brackets and no x axis of a plot has a negative
   limit or tick label (cycle 24);
-- Fig. 3: in every codec panel the two series are the valid E4 rows of the simple and the complex fragment of Fig. 2,
+- Fig. 4: in every codec panel the two series are the valid E4 rows of the simple and the complex fragment of Fig. 3,
   solid and dashed, the x axis from the style key of 0 to the largest PCC of the plan with the VVC points of QP below 0
   kept in the data and the CSV (cycle 24), the y axis of (a) VVC up to the style key of 80 dB with the points above it
-  kept in the data and the CSV (cycle 23); Fig. 4: per codec one point per fragment at (MGM, threshold PCC of
-  E5), small markers and no line, rho of E5 in the title; Fig. 5: 9 CI segments and 9 estimates per panel equal to
+  kept in the data and the CSV (cycle 23); Fig. 5: per codec one point per fragment at (MGM, threshold PCC of
+  E5), small markers and no line, rho of E5 in the title; Fig. 6: 9 CI segments and 9 estimates per panel equal to
   the comparisons of E5 (patients) and the whole-image comparisons, the vertical line r = 1 (cycle 22);
-- Fig. 7: the upper row - the original and the reconstructions; the lower row - the region repeated 4 times by pixels
+- Fig. 8: the upper row - the original and the reconstructions; the lower row - the region repeated 4 times by pixels
   (the test's own index arithmetic), the region - the block with the largest MGM by the test's own Sobel sums, ties to
   the smaller row and column; a reconstruction that differs from E4 is refused; the titles of the panels do not overlap;
 - in the PNG every image panel is a whole multiple of its pixels, pixel for pixel;
@@ -66,7 +69,7 @@ D10_MGM = (0.030, 0.035, 0.046, 0.050, 0.0437, 0.052, 0.055, 0.0405)  # its frag
 OWNER_C = "D10_r00_c02"  # Fig. 1 (c): the owner's choice, task of cycle 21
 FRAGMENT_RHO = (0.7619, -0.98246, 0.2453, -0.95)  # rho of the threshold PCC on MGM by codec; -0.95 is printed -0.950
 RHO_PRINTED = ("0.762", "-0.982", "0.245", "-0.950")
-FIG3_SERIES = {"simple": f"simple, {SIMPLEST}", "complex": f"complex, {CHOSEN}"}  # the line labels of Fig. 3
+FIG4_SERIES = {"simple": f"simple, {SIMPLEST}", "complex": f"complex, {CHOSEN}"}  # the line labels of Fig. 4
 
 
 @pytest.fixture(scope="module")
@@ -85,6 +88,12 @@ def original_fragment():
     image[256:384, 128:256] = rng.integers(0, 256, (128, 128))
     image[0:128, 384:512] = rng.integers(100, 140, (128, 128))
     return image
+
+
+def simple_fragment():
+    """512 x 512: the fragment of the simplest structure - a ramp along the rows, unlike the other fragments."""
+    y, x = np.mgrid[0:512, 0:512]
+    return ((x // 2 + y // 64) % 256).astype(np.uint8)
 
 
 def whole_d10():
@@ -125,11 +134,13 @@ def synthetic(cache):
                 rows.append({"unit": f["unit"], "codec": c, "param": p, "status": "valid", "cr_file": 2.0 + j + k / 10,
                              "psnr_hvs_m_db": 50.0 - 0.7 * j - k / 5 - 10 * f["mgm"] + 40 * (c == "vtm" and j < 4),
                              # every fragment a curve of its own; VVC at QP -2 to 1 above 80 dB, at QP -2 and -1 left
-                             # of the x axis (Fig. 3 (a))
-                             "psnr_db": 45.0 - 0.6 * j - k / 4 - f["mgm"], "file_sha256": file_sha, "recon_sha256": recon_sha})
+                             # of the x axis (Fig. 4 (a))
+                             "psnr_db": 45.0 - 0.6 * j - k / 4 - f["mgm"], "haarpsi": 0.99 - 0.03 * j - k / 50 - f["mgm"],
+                             "file_sha256": file_sha, "recon_sha256": recon_sha})
             rows.append({"unit": f["unit"], "codec": c, "param": 999, "status": "lossless", "cr_file": 1.5,
-                         "psnr_hvs_m_db": "+inf", "psnr_db": "+inf", "file_sha256": "0" * 64, "recon_sha256": "0" * 64})
-            f[f"pcc_{c}"] = params[11] - (f["mgm"] > 0.05 and f["unit"] != CHOSEN)  # the threshold PCC of E5 (Fig. 4)
+                         "psnr_hvs_m_db": "+inf", "psnr_db": "+inf", "haarpsi": 1.0, "file_sha256": "0" * 64,
+                         "recon_sha256": "0" * 64})
+            f[f"pcc_{c}"] = params[11] - (f["mgm"] > 0.05 and f["unit"] != CHOSEN)  # the threshold PCC of E5 (Fig. 5)
             units.append({"unit": f["unit"], "image": f["image"], "level": "f", "codec": c, "t_db": 42.0, "judged": True,
                           "reason": None, "pcc": f[f"pcc_{c}"], "cr": 2.0 + 11 + k / 10,
                           "psnr_hvs_m_db": 50.0 - 0.7 * 11 - k / 5, "psnr_db": 38.5 + k + f["mgm"],
@@ -190,7 +201,7 @@ def synthetic(cache):
                        ("cycles/16/e6_pages.json", e6), ("cycles/9/p001_tiles.json", tiles)):
         (cache / name).parent.mkdir(parents=True, exist_ok=True)
         (cache / name).write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-    arrays = {CHOSEN: original, "D10": whole}
+    arrays = {CHOSEN: original, SIMPLEST: simple_fragment(), "D10": whole}
     arrays |= {unit: whole[y:y + 512, x:x + 512].copy() for unit, (x, y) in grid.items()}
     return e4, e5, fragments, arrays
 
@@ -271,7 +282,7 @@ def test_two_builds_write_the_same_bytes_and_no_time_of_the_build(built, tmp_pat
                         log=lambda *a: None)
     digest = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()  # noqa: E731
     first, second = ({name: digest(out / name) for name in fg.OUTPUTS} for out in (built["out"], again))
-    assert first == second and len(first) == 29
+    assert first == second and len(first) == 32
     trim = lambda row: row[:max([k + 1 for k, v in enumerate(row) if v != ""], default=0)]  # noqa: E731
     checked = {".pdf": 0, ".xlsx": 0}
     for name in fg.OUTPUTS:
@@ -291,7 +302,7 @@ def test_two_builds_write_the_same_bytes_and_no_time_of_the_build(built, tmp_pat
         else:
             continue
         checked[path.suffix] += 1
-    assert checked == {".pdf": 7, ".xlsx": 3}
+    assert checked == {".pdf": 8, ".xlsx": 3}
 
 
 def test_fragment_choice_by_the_rules_with_ties(fg):
@@ -404,70 +415,79 @@ def matplotlib_colour(text):
 
 
 def test_figure_csv_equal_the_run_files(built):
+    by_unit = {f["unit"]: f["mgm"] for f in built["fragments"]}
     fig2 = read_csv(built["out"] / "figures" / "fig2.csv")
     head = fig2[0]
-    for unit, panels in ((SIMPLEST, "ac"), (CHOSEN, "bd")):
-        for panel, field in zip(panels, ("psnr_hvs_m_db", "psnr_db")):
+    fragments = {r[head.index("panel")]: (r[head.index("structure")], r[head.index("unit")], float(r[head.index("mgm")]))
+                 for r in fig2[1:] if r[head.index("kind")] == "fragment"}
+    assert fragments == {"a": ("simple", SIMPLEST, by_unit[SIMPLEST]), "b": ("complex", CHOSEN, by_unit[CHOSEN])}
+    assert len(fig2) == 1 + 2 + 2  # the fragments, the boxes of the PNG - no pixel
+    fig3 = read_csv(built["out"] / "figures" / "fig3.csv")
+    head = fig3[0]
+    assert head == ["panel", "fragment", "codec", "pcc", "cr", "psnr_hvs_m_db", "psnr_db", "haarpsi"]  # haarpsi - cycle 25
+    for unit, panels in ((SIMPLEST, "ace"), (CHOSEN, "bdf")):
+        for panel, field in zip(panels, ("psnr_hvs_m_db", "psnr_db", "haarpsi")):
             want = sorted((r["codec"], r["param"], r["cr_file"], r[field]) for r in built["e4"]["rows"]
                           if r["unit"] == unit and r["status"] == "valid")
             got = sorted((r[head.index("codec")], int(r[head.index("pcc")]), float(r[head.index("cr")]),
-                          float(r[head.index(field)])) for r in fig2[1:] if r[head.index("panel")] == panel)
-            assert got == want and {r[head.index("fragment")] for r in fig2[1:] if r[head.index("panel")] == panel} == {unit}
-    fig3 = read_csv(built["out"] / "figures" / "fig3.csv")
-    assert fig3[0] == ["panel", "codec", "fragment", "structure", "pcc", "psnr_hvs_m_db"]
+                          float(r[head.index(field)])) for r in fig3[1:] if r[head.index("panel")] == panel)
+            assert got == want and {r[head.index("fragment")] for r in fig3[1:] if r[head.index("panel")] == panel} == {unit}
+    fig4 = read_csv(built["out"] / "figures" / "fig4.csv")
+    assert fig4[0] == ["panel", "codec", "fragment", "structure", "pcc", "psnr_hvs_m_db"]
     want = sorted((letter, r["codec"], r["unit"], what, r["param"], r["psnr_hvs_m_db"]) for letter, c in zip("abcd", CODECS)
                   for unit, what in ((SIMPLEST, "simple"), (CHOSEN, "complex")) for r in built["e4"]["rows"]
                   if r["unit"] == unit and r["codec"] == c and r["status"] == "valid")
-    assert sorted((r[0], r[1], r[2], r[3], int(r[4]), float(r[5])) for r in fig3[1:]) == want
-    fig4 = read_csv(built["out"] / "figures" / "fig4.csv")
-    assert fig4[0] == ["panel", "codec", "fragment", "mgm", "threshold_pcc"]
+    assert sorted((r[0], r[1], r[2], r[3], int(r[4]), float(r[5])) for r in fig4[1:]) == want
+    fig5 = read_csv(built["out"] / "figures" / "fig5.csv")
+    assert fig5[0] == ["panel", "codec", "fragment", "mgm", "threshold_pcc"]
     want = sorted((letter, c, f["unit"], f["mgm"], f[f"pcc_{c}"]) for letter, c in zip("abcd", CODECS)
                   for f in built["fragments"])
-    assert sorted((r[0], r[1], r[2], float(r[3]), int(r[4])) for r in fig4[1:]) == want
+    assert sorted((r[0], r[1], r[2], float(r[3]), int(r[4])) for r in fig5[1:]) == want
     a = built["e5"]["analysis"]
-    fig5 = read_csv(built["out"] / "figures" / "fig5.csv")
-    assert fig5[0] == ["panel", "level", "pair", "t_db", "n", "ratio", "ratio_low", "ratio_high"]
+    fig6 = read_csv(built["out"] / "figures" / "fig6.csv")
+    assert fig6[0] == ["panel", "level", "pair", "t_db", "n", "ratio", "ratio_low", "ratio_high"]
     want = sorted((letter, what, x["pair"], x["t_db"], x["n"], x["ratio"], x["ratio_low"], x["ratio_high"])
                   for letter, what, name in (("a", "patients", "comparisons"), ("b", "whole images", "whole_comparisons"))
                   for x in a[name] if x["pair"] != "vtm/jpeg_opt")
-    assert sorted((r[0], r[1], r[2], float(r[3]), int(r[4]), *map(float, r[5:])) for r in fig5[1:]) == want
+    assert sorted((r[0], r[1], r[2], float(r[3]), int(r[4]), *map(float, r[5:])) for r in fig6[1:]) == want
     mgm = {p["image"]: p["mgm"] for p in a["complexity"]["patients"]}
-    fig6 = read_csv(built["out"] / "figures" / "fig6.csv")
-    assert fig6[0] == ["panel", "series", "patient", "mgm", "value"]
+    fig7 = read_csv(built["out"] / "figures" / "fig7.csv")
+    assert fig7[0] == ["panel", "series", "patient", "mgm", "value"]
     want = sorted([("a", p["codec"], p["image"], mgm[p["image"]], p["median_cr"]) for p in a["patients"]] +
                   [("b", x["pair"], x["image"], mgm[x["image"]], x["r"]) for x in a["ratios"]])
-    assert sorted((r[0], r[1], r[2], float(r[3]), float(r[4])) for r in fig6[1:]) == want
-    fig7 = read_csv(built["out"] / "figures" / "fig7.csv")
-    head = fig7[0]
-    region = [r for r in fig7[1:] if r[head.index("kind")] == "region"]
+    assert sorted((r[0], r[1], r[2], float(r[3]), float(r[4])) for r in fig7[1:]) == want
+    fig8 = read_csv(built["out"] / "figures" / "fig8.csv")
+    head = fig8[0]
+    region = [r for r in fig8[1:] if r[head.index("kind")] == "region"]
     assert len(region) == 1 and (region[0][head.index("row")], region[0][head.index("column")]) == ("2", "1")
-    panels = [r for r in fig7[1:] if r[head.index("kind")] == "panel"]
+    panels = [r for r in fig8[1:] if r[head.index("kind")] == "panel"]
     assert [(r[head.index("codec")], int(r[head.index("pcc")])) for r in panels] == list(THRESHOLD_PCC.items())
-    assert len(fig7) == 1 + 16 + 1 + 4 + 10  # blocks, region, panels, the boxes of the PNG - no pixel
+    assert len(fig8) == 1 + 16 + 1 + 4 + 10  # blocks, region, panels, the boxes of the PNG - no pixel
     fig1 = read_csv(built["out"] / "figures" / "fig1.csv")
     head = fig1[0]
     assert len([r for r in fig1[1:] if r[head.index("kind")] == "tile"]) == 8 and len(fig1) == 1 + 8 + 1 + 3 + 3
 
 
 def plotted(built):
-    """Figures 2, 6 and 3 drawn - the plots of lines with markers: [(axes, the labels of its data series, the labels of
-    its reference lines, legend texts)]."""
+    """Figures 3, 7 and 4 drawn - the plots of lines with markers: [(axes, the labels of its data series, the labels of
+    its reference lines, legend texts)]; the six panels of Fig. 3 first."""
     fg = built["fg"]
     style = style_of(fg)
     e4, e5, _, _ = sources(built)
     plt, _ = fg.setup(style)
-    f2 = fg.fig2(e4, e5, style, plt)[0]
-    f6 = fg.fig6(e5, style, plt)[0]
     f3 = fg.fig3(e4, e5, style, plt)[0]
-    shared = {t.get_text() for t in f2.legends[0].get_texts()}
-    top, bottom = f6.axes
-    panels = [(ax, set(LABELS.values()), THRESHOLD_LABELS if k < 2 else set(), shared) for k, ax in enumerate(f2.axes)]
+    f7 = fg.fig7(e5, style, plt)[0]
+    f4 = fg.fig4(e4, e5, style, plt)[0]
+    shared = {t.get_text() for t in f3.legends[0].get_texts()}
+    top, bottom = f7.axes
+    assert len(f3.axes) == 6  # PSNR-HVS-M, PSNR and HaarPSI (cycle 25)
+    panels = [(ax, set(LABELS.values()), THRESHOLD_LABELS if k < 2 else set(), shared) for k, ax in enumerate(f3.axes)]
     panels += [(top, set(LABELS.values()), set(), {t.get_text() for t in top.get_legend().get_texts()}),
                (bottom, set(PAIR_LABELS.values()), {"r = 1"}, {t.get_text() for t in bottom.get_legend().get_texts()})]
-    above = {t.get_text() for t in f3.legends[0].get_texts()}
-    panels += [(ax, set(FIG3_SERIES.values()), THRESHOLD_LABELS, {t.get_text() for t in ax.get_legend().get_texts()} | above)
-               for ax in f3.axes]
-    return style, plt, [f2, f6, f3], panels
+    above = {t.get_text() for t in f4.legends[0].get_texts()}
+    panels += [(ax, set(FIG4_SERIES.values()), THRESHOLD_LABELS, {t.get_text() for t in ax.get_legend().get_texts()} | above)
+               for ax in f4.axes]
+    return style, plt, [f3, f7, f4], panels
 
 
 def test_every_series_is_a_line_with_small_markers_and_in_the_legend(built):
@@ -488,7 +508,7 @@ def test_every_series_is_a_line_with_small_markers_and_in_the_legend(built):
             x = list(line.get_xdata())
             assert x == sorted(x), name  # points joined in ascending x
         assert series | references <= legend, legend
-    assert {t for _, _, _, legend in panels[:4] for t in legend} == set(LABELS.values()) | THRESHOLD_LABELS
+    assert {t for _, _, _, legend in panels[:6] for t in legend} == set(LABELS.values()) | THRESHOLD_LABELS
     for fig in figs:
         plt.close(fig)
 
@@ -496,7 +516,7 @@ def test_every_series_is_a_line_with_small_markers_and_in_the_legend(built):
 def test_log_axis_labels_are_plain_numbers(built):
     style, plt, figs, panels = plotted(built)
     figs[0].canvas.draw()
-    for ax, *_ in panels[:4]:
+    for ax, *_ in panels[:6]:
         assert ax.get_xscale() == "log"
         labels = [t.get_text() for t in ax.get_xticklabels(which="both") if t.get_text()]
         assert labels and all(re.fullmatch(r"\d+(\.\d+)?", t) for t in labels), labels
@@ -511,8 +531,8 @@ def test_pcc_axis_labels_without_brackets_and_no_negative_x(drawn):
     style = style_of(fg)
     e4, e5, _, _ = sources(drawn)
     plt, _ = fg.setup(style)
-    figs = {"fig2": fg.fig2(e4, e5, style, plt)[0], "fig3": fg.fig3(e4, e5, style, plt)[0],
-            "fig4": fg.fig4(e5, style, plt)[0], "fig5": fg.fig5(e5, style, plt)[0], "fig6": fg.fig6(e5, style, plt)[0]}
+    figs = {"fig3": fg.fig3(e4, e5, style, plt)[0], "fig4": fg.fig4(e4, e5, style, plt)[0],
+            "fig5": fg.fig5(e5, style, plt)[0], "fig6": fg.fig6(e5, style, plt)[0], "fig7": fg.fig7(e5, style, plt)[0]}
     pcc = []
     for name, fig in figs.items():
         fig.canvas.draw()
@@ -525,7 +545,7 @@ def test_pcc_axis_labels_without_brackets_and_no_negative_x(drawn):
                       if t.get_text() and low <= t.get_position()[0] <= high]
         assert ticks and not any(t.startswith(("-", "−")) for t in ticks), (name, ticks)  # matplotlib's minus is U+2212
         plt.close(fig)
-    assert pcc == [("fig3", "PCC")] * 4 + [("fig4", "Threshold PCC, 42 dB")] * 4  # no bracket, and none left out
+    assert pcc == [("fig4", "PCC")] * 4 + [("fig5", "Threshold PCC, 42 dB")] * 4  # no bracket, and none left out
 
 
 def drawn_plot(drawn, name):
@@ -533,19 +553,83 @@ def drawn_plot(drawn, name):
     style = style_of(fg)
     e4, e5, _, _ = sources(drawn)
     plt, _ = fg.setup(style)
-    args = (e4, e5) if name == "fig3" else (e5,)
+    args = (e4, e5) if name in ("fig3", "fig4") else (e5,)
     return style, plt, getattr(fg, name)(*args, style, plt)
 
 
-def test_fig3_two_fragments_per_codec_solid_and_dashed_over_the_plan(drawn):
+def test_fig2_the_fragments_of_the_plots_pixel_for_pixel_and_letters_below(drawn):
+    """Fig. 2 (owner, cycle 25): (a) the simple, (b) the complex fragment - the very fragments of Fig. 3 and Fig. 4; the
+    pixels of the loader (the grid) as they are, no mark on them; one row, the letters below it."""
+    fg = drawn["fg"]
+    style = style_of(fg)
+    e4, e5, _, tiles = sources(drawn)
+    plt, _ = fg.setup(style)
+    fig, data, series, dpi, panels, caption = fg.fig2(e5, tiles, drawn["arrays"], style, plt)
+    f3, d3 = fg.fig3(e4, e5, style, plt)[:2]
+    f4 = fg.fig4(e4, e5, style, plt)[0]
+    units = [p["unit"] for p in panels]
+    assert units == [SIMPLEST, CHOSEN]
+    in_fig3 = {}
+    for r in d3:
+        in_fig3.setdefault(r["panel"], set()).add(r["fragment"])
+    assert in_fig3 == {letter: {units[k % 2]} for k, letter in enumerate("abcdef")}
+    in_fig4 = {x.get_label() for ax in f4.axes for x in ax.get_lines() if not x.get_label().startswith("T = ")}
+    assert in_fig4 == {f"simple, {units[0]}", f"complex, {units[1]}"}
+    for ax, unit in zip(fig.axes, units):
+        (shown,) = ax.get_images()
+        got = np.asarray(shown.get_array())
+        assert got.dtype == np.uint8 and got.shape == (512, 512, 3) and shown.get_interpolation() == "none", unit
+        assert all(np.array_equal(got[..., ch], drawn["arrays"][unit]) for ch in range(3)), unit
+        assert not ax.patches and not ax.texts, unit  # nothing drawn over the image
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    a, b = (ax.get_window_extent(renderer) for ax in fig.axes)
+    k = style["figures"]["fig2_scale"]
+    assert [(round(x.width), round(x.height)) for x in (a, b)] == [(512 * k, 512 * k)] * 2
+    assert a.x1 < b.x0 and a.y0 == b.y0  # one row
+    width = {"column": style["page"]["column_cm"], "double": style["page"]["double_column_cm"]}[style["figures"]["fig2_width"]]
+    assert abs(fig.get_size_inches()[0] * 2.54 - width) < 0.01
+    letters = sorted(fig.texts, key=lambda x: x.get_position()[0])
+    assert [x.get_text() for x in letters] == ["(a)", "(b)"]
+    for letter, box in zip(letters, (a, b)):
+        extent = letter.get_window_extent(renderer)
+        assert extent.y1 < box.y0 and box.x0 < (extent.x0 + extent.x1) / 2 < box.x1, letter.get_text()
+    mgm = {f["unit"]: f["mgm"] for f in drawn["fragments"]}
+    assert caption["value"] == (
+        f"Fig. 2. The fragments of the plots of Figs. 3 and 4, 512 × 512 pixels: of simple structure {SIMPLEST}, "
+        f"MGM = {mgm[SIMPLEST]:.4f} (a) and of complex structure {CHOSEN}, MGM = {mgm[CHOSEN]:.4f} (b).")
+    for x in (fig, f3, f4):
+        plt.close(x)
+
+
+def test_fig3_haarpsi_panels_equal_e4_without_threshold_lines(drawn):
+    """Fig. 3 (owner, cycle 25): the third row (e), (f) - HaarPSI of the valid E4 rows on CR of the simple and the complex
+    fragment, a line per codec on the logarithmic CR axis, no threshold line below the first row."""
     style, plt, (fig, *_) = drawn_plot(drawn, "fig3")
+    assert len(fig.axes) == 6
+    for ax, unit in ((fig.axes[4], SIMPLEST), (fig.axes[5], CHOSEN)):
+        lines = {x.get_label(): x for x in ax.get_lines()}
+        assert set(lines) == set(LABELS.values()), set(lines)
+        for c in CODECS:
+            want = sorted((r["cr_file"], r["haarpsi"]) for r in drawn["e4"]["rows"]
+                          if r["unit"] == unit and r["codec"] == c and r["status"] == "valid")
+            assert list(zip(lines[LABELS[c]].get_xdata(), lines[LABELS[c]].get_ydata())) == want, (unit, c)
+        assert (ax.get_xlabel(), ax.get_ylabel(), ax.get_xscale()) == ("CR", "HaarPSI", "log")
+    assert [ax.get_title(loc="left") for ax in fig.axes] == [f"({x}) {what} structure" for x, what in
+                                                            zip("abcdef", ("simple", "complex") * 3)]
+    assert not [x for ax in fig.axes[2:] for x in ax.get_lines() if x.get_label().startswith("T = ")]
+    plt.close(fig)
+
+
+def test_fig4_two_fragments_per_codec_solid_and_dashed_over_the_plan(drawn):
+    style, plt, (fig, *_) = drawn_plot(drawn, "fig4")
     plan = drawn["e4"]["header"]["plan"]
     assert len(fig.axes) == 4
     for k, (ax, c) in enumerate(zip(fig.axes, CODECS)):
         assert ax.get_title(loc="left") == f"({'abcd'[k]}) {LABELS[c]}"
         lines = {x.get_label(): x for x in ax.get_lines()}
         for unit, what, dash in ((SIMPLEST, "simple", "-"), (CHOSEN, "complex", "--")):
-            line = lines[FIG3_SERIES[what]]
+            line = lines[FIG4_SERIES[what]]
             want = sorted((r["param"], r["psnr_hvs_m_db"]) for r in drawn["e4"]["rows"]
                           if r["unit"] == unit and r["codec"] == c and r["status"] == "valid")
             assert list(zip(line.get_xdata(), line.get_ydata())) == want, (c, what)
@@ -553,24 +637,24 @@ def test_fig3_two_fragments_per_codec_solid_and_dashed_over_the_plan(drawn):
             assert matplotlib_colour(line.get_color()) == matplotlib_colour(style["codecs"][c]["color"]), (c, what)
         values = plan["vtm"]["f"] if c == "vtm" else plan[c]
         # the x axis from the style key of 0 (cycle 24); in (a) the points of QP below 0 are still in the data
-        assert ax.get_xlim() == (style["figures"]["fig3_pcc_min"], max(values)) == (0, max(values)), c
+        assert ax.get_xlim() == (style["figures"]["fig4_pcc_min"], max(values)) == (0, max(values)), c
         assert ax.get_xlabel() == "PCC", c
         if c == "vtm":
-            assert all(min(lines[name].get_xdata()) < 0 for name in FIG3_SERIES.values())
+            assert all(min(lines[name].get_xdata()) < 0 for name in FIG4_SERIES.values())
         # the y axis: the bottom - matplotlib's automatic margin of 5 % over all the data of the panel, written again;
         # the top - the same in (b)-(d), the style key of 80 dB in (a) (cycle 23), the points above it still in the data
         ys = [y for x in ax.get_lines() for y in x.get_ydata()]
         low, high = min(ys), max(ys)
         assert ax.get_ylim()[0] == pytest.approx(low - 0.05 * (high - low)), c
         if c == "vtm":
-            assert ax.get_ylim()[1] == style["figures"]["fig3_vvc_ymax_db"] == 80 < high, (ax.get_ylim(), high)
+            assert ax.get_ylim()[1] == style["figures"]["fig4_vvc_ymax_db"] == 80 < high, (ax.get_ylim(), high)
         else:
             assert ax.get_ylim()[1] == pytest.approx(high + 0.05 * (high - low)), c
     plt.close(fig)
 
 
-def test_fig4_one_point_per_fragment_without_lines_and_rho_of_e5(drawn):
-    style, plt, (fig, *_) = drawn_plot(drawn, "fig4")
+def test_fig5_one_point_per_fragment_without_lines_and_rho_of_e5(drawn):
+    style, plt, (fig, *_) = drawn_plot(drawn, "fig5")
     assert len(fig.axes) == 4
     for k, (ax, c) in enumerate(zip(fig.axes, CODECS)):
         (points,) = ax.get_lines()
@@ -584,8 +668,8 @@ def test_fig4_one_point_per_fragment_without_lines_and_rho_of_e5(drawn):
     plt.close(fig)
 
 
-def test_fig5_ci_segments_and_estimates_equal_e5_and_the_line_r_1(drawn):
-    style, plt, (fig, *_) = drawn_plot(drawn, "fig5")
+def test_fig6_ci_segments_and_estimates_equal_e5_and_the_line_r_1(drawn):
+    style, plt, (fig, *_) = drawn_plot(drawn, "fig6")
     a = drawn["e5"]["analysis"]
     second = {f"vtm/{b}": b for b in ("jpeg", "heif", "avif")}
     segments = 0
@@ -614,21 +698,21 @@ def test_fig5_ci_segments_and_estimates_equal_e5_and_the_line_r_1(drawn):
     plt.close(fig)
 
 
-def test_fig4_and_fig5_refuse_an_n_that_differs_from_the_printed_one(drawn):
+def test_fig5_and_fig6_refuse_an_n_that_differs_from_the_printed_one(drawn):
     fg = drawn["fg"]
     style = style_of(fg)
     plt, _ = fg.setup(style)
     _, e5, _, _ = sources(drawn)
     for x in e5.data["analysis"]["complexity"]["rho"]:
         x["n"] = 7 if x["level"] == "фрагменты" else x["n"]
-    with pytest.raises(fg.RunRefusal, match=re.escape(f"Fig. 4: rho of E5 is over 7 fragments, the panels show "
+    with pytest.raises(fg.RunRefusal, match=re.escape(f"Fig. 5: rho of E5 is over 7 fragments, the panels show "
                                                       f"{len(drawn['fragments'])}")):
-        fg.fig4(e5, style, plt)
+        fg.fig5(e5, style, plt)
     _, e5, _, _ = sources(drawn)
     for x in e5.data["analysis"]["whole_comparisons"]:
         x["n"] = 15
-    with pytest.raises(fg.RunRefusal, match=re.escape("Fig. 5: n = 16 patients and n = 15 whole images")):
-        fg.fig5(e5, style, plt)
+    with pytest.raises(fg.RunRefusal, match=re.escape("Fig. 6: n = 16 patients and n = 15 whole images")):
+        fg.fig6(e5, style, plt)
     plt.close("all")
 
 
@@ -653,18 +737,18 @@ def by_repetition(part, k):
     return part[rows][:, cols]
 
 
-def drawn_fig7(built, tmp_path):
+def drawn_fig8(built, tmp_path):
     fg = built["fg"]
     style = style_of(fg)
     e4, e5, e6, _ = sources(built)
     unit, original, recons = fg.comparison(e4, e5, e6, built["arrays"], {"cache_root": built["cache"]}, tmp_path,
                                            lambda *a: None)
     plt, _ = fg.setup(style)
-    return plt, unit, original, fg.fig7(e5, e6, unit, original, recons, style, plt)
+    return plt, unit, original, fg.fig8(e5, e6, unit, original, recons, style, plt)
 
 
-def test_fig7_panels_are_the_reconstructions_and_their_region_by_repetition(built, tmp_path):
-    plt, unit, original, (fig, data, series, dpi, panels, caption) = drawn_fig7(built, tmp_path)
+def test_fig8_panels_are_the_reconstructions_and_their_region_by_repetition(built, tmp_path):
+    plt, unit, original, (fig, data, series, dpi, panels, caption) = drawn_fig8(built, tmp_path)
     assert unit == CHOSEN and np.array_equal(original, built["arrays"][CHOSEN])
     r, c = expected_region(original)
     assert (r, c) == (2, 1)
@@ -687,8 +771,8 @@ def test_fig7_panels_are_the_reconstructions_and_their_region_by_repetition(buil
     plt.close(fig)
 
 
-def test_fig7_titles_do_not_overlap(built, tmp_path):
-    plt, _, _, (fig, *_) = drawn_fig7(built, tmp_path)
+def test_fig8_titles_do_not_overlap(built, tmp_path):
+    plt, _, _, (fig, *_) = drawn_fig8(built, tmp_path)
     fig.canvas.draw()
     renderer = fig.canvas.get_renderer()
     boxes = sorted((ax.title.get_window_extent(renderer) for ax in fig.axes if ax.get_title()), key=lambda b: b.x0)
@@ -700,7 +784,7 @@ def test_fig7_titles_do_not_overlap(built, tmp_path):
     plt.close(fig)
 
 
-def test_fig7_region_ties_go_to_the_smaller_row_then_column(fg):
+def test_fig8_region_ties_go_to_the_smaller_row_then_column(fg):
     rng = np.random.default_rng(5)
     noise = rng.integers(0, 256, (128, 128)).astype(np.uint8)
     flat = np.full((512, 512), 77, np.uint8)
@@ -712,7 +796,7 @@ def test_fig7_region_ties_go_to_the_smaller_row_then_column(fg):
         assert fg.region_of(image)[:2] == want == expected_region(image)
 
 
-def test_fig7_refuses_a_reconstruction_that_differs_from_e4(built, tmp_path):
+def test_fig8_refuses_a_reconstruction_that_differs_from_e4(built, tmp_path):
     fg = built["fg"]
     e4, e5, e6, _ = sources(built)
     coders(fg, built["monkeypatch"], built["arrays"], wrong="heif")
@@ -732,12 +816,13 @@ def test_png_image_panels_are_whole_multiples_pixel_for_pixel(built):
     _, want, _ = typical_by_rule(built["fragments"])
     crop = {u: whole[grid[u][1]:grid[u][1] + 512, grid[u][0]:grid[u][0] + 512] for u in want}
     expected = {("fig1", "a"): (whole, True), ("fig1", "b"): (crop[want[0]], False), ("fig1", "c"): (crop[want[1]], False),
-                ("fig7", "upper original"): (original, True), ("fig7", "lower original"): (region(original), False)}
+                ("fig2", "a"): (built["arrays"][SIMPLEST], False), ("fig2", "b"): (original, False),
+                ("fig8", "upper original"): (original, True), ("fig8", "lower original"): (region(original), False)}
     for k in CODECS:
-        expected[("fig7", f"upper {k}")] = (recon[k], True)
-        expected[("fig7", f"lower {k}")] = (region(recon[k]), False)
+        expected[("fig8", f"upper {k}")] = (recon[k], True)
+        expected[("fig8", f"lower {k}")] = (region(recon[k]), False)
     checked = 0
-    for name in ("fig1", "fig7"):
+    for name in ("fig1", "fig2", "fig8"):
         png = np.asarray(Image.open(built["out"] / "figures" / f"{name}.png").convert("RGB"))
         rows = read_csv(built["out"] / "figures" / f"{name}.csv")
         head = rows[0]
@@ -750,7 +835,7 @@ def test_png_image_panels_are_whole_multiples_pixel_for_pixel(built):
             assert np.array_equal(got[..., 0][flat], want_[flat]), row
             assert float((~flat).mean()) <= (0.05 if marks else 0.0), row
             checked += 1
-    assert checked == 13
+    assert checked == 15
 
 
 def test_no_vvc_vtm_in_any_output(built, tmp_path):
@@ -768,9 +853,9 @@ def test_no_vvc_vtm_in_any_output(built, tmp_path):
     e4, e5, e6, tiles = sources(built)
     plt, _ = fg.setup(style)
     figs = [fg.fig1(e5, tiles, built["arrays"], style, plt, "png")[0], fg.fig1(e5, tiles, built["arrays"], style, plt, "pdf")[0],
-            fg.fig2(e4, e5, style, plt)[0], fg.fig3(e4, e5, style, plt)[0], fg.fig4(e5, style, plt)[0],
-            fg.fig5(e5, style, plt)[0], fg.fig6(e5, style, plt)[0],
-            drawn_fig7(built, tmp_path)[3][0]]
+            fg.fig2(e5, tiles, built["arrays"], style, plt)[0], fg.fig3(e4, e5, style, plt)[0],
+            fg.fig4(e4, e5, style, plt)[0], fg.fig5(e5, style, plt)[0], fg.fig6(e5, style, plt)[0],
+            fg.fig7(e5, style, plt)[0], drawn_fig8(built, tmp_path)[3][0]]
     texts = [t.get_text() for fig in figs for t in fig.findobj(match=lambda o: hasattr(o, "get_text"))]
     assert texts and not any("VVC (VTM)" in t or CYRILLIC.search(t) for t in texts)
     for fig in figs:
@@ -865,15 +950,16 @@ def test_every_index_value_equals_its_key(built):
     assert checked > 200
     ids = [r[0] for r in index[1:]]
     assert len(ids) == len(set(ids))
-    for prefix in ("Fig. 1 / ", "Fig. 2 (a) / ", "Fig. 3 (b) / ", "Fig. 4 (d) / ", "Fig. 5 (a) / ", "Fig. 6 (b) / ",
-                   "Fig. 7 / ", "Table 1 / ", "Table 2 / note / ", "Table 3 / ", "Caption Fig. 1 / ", "Caption Fig. 5 / ",
-                   "Caption Fig. 7 / ", "Caption Table 3 / "):
+    for prefix in ("Fig. 1 / ", "Fig. 2 / ", "Fig. 3 (a) / ", "Fig. 3 (e) / ", "Fig. 4 (b) / ", "Fig. 5 (d) / ",
+                   "Fig. 6 (a) / ", "Fig. 7 (b) / ", "Fig. 8 / ", "Table 1 / ", "Table 2 / note / ", "Table 3 / ",
+                   "Caption Fig. 1 / ", "Caption Fig. 2 / ", "Caption Fig. 6 / ", "Caption Fig. 8 / ", "Caption Table 3 / "):
         assert any(i.startswith(prefix) for i in ids), prefix
-    # the former Fig. 3 and Fig. 4 are Fig. 6 and Fig. 7 (cycle 22): their rows moved, none is left under the old number
-    for moved in ("Fig. {} / x: MGM of the patients", "Fig. {} / fragment", "Caption Fig. {} / n patients",
-                  "Caption Fig. {} / zoom"):
-        old, new = (3, 6) if "patients" in moved else (4, 7)
-        assert moved.format(new) in ids and moved.format(old) not in ids, moved
+    # the former Fig. 2 to Fig. 7 are Fig. 3 to Fig. 8 (cycle 25): their rows moved, none is left under the old number
+    for moved, old in (("Fig. {} / threshold lines, dB", 2), ("Caption Fig. {} / axis top (a)", 3), ("Fig. {} / n of rho", 4),
+                       ("Fig. {} (b) / n whole images", 5), ("Fig. {} / x: MGM of the patients", 6),
+                       ("Caption Fig. {} / n patients", 6), ("Fig. {} / fragment", 7), ("Caption Fig. {} / zoom", 7)):
+        assert moved.format(old + 1) in ids and moved.format(old) not in ids, moved
+    assert "Fig. 4 (a) / PCC range of the plan" in ids and not [i for i in ids if "x: PCC range" in i]  # owner, cycle 24
 
 
 def test_every_table_row_of_the_index_is_its_cell(built):
@@ -896,19 +982,25 @@ def test_every_table_row_of_the_index_is_its_cell(built):
 def test_every_digit_of_the_captions_is_an_index_row(built):
     captions = (built["out"] / "figures" / "captions.txt").read_text(encoding="utf-8").strip().split("\n\n")
     labels = [re.match(r"(Fig\. \d|Table \d)\. ", c).group(1) for c in captions]
-    assert labels == [f"Fig. {n}" for n in range(1, 8)] + ["Table 1", "Table 2", "Table 3"]
+    assert labels == [f"Fig. {n}" for n in range(1, 9)] + ["Table 1", "Table 2", "Table 3"]
     index = read_csv(built["out"] / "tables" / "numbers_index.csv")[1:]
-    assert captions[1].startswith("Fig. 2. Dependences of PSNR-HVS-M (a,b) and PSNR (c,d) on compression ratio (CR)")
-    assert captions[2:5] == [  # the forms of the task of cycle 22
-        "Fig. 3. Dependences of PSNR-HVS-M on PCC for VVC (a), JPEG (b), HEIF (c) and AVIF (d) for the fragments of "
+    mgm = {f["unit"]: f["mgm"] for f in built["fragments"]}
+    assert captions[1:3] == [  # the forms of the task of cycle 25
+        f"Fig. 2. The fragments of the plots of Figs. 3 and 4, 512 × 512 pixels: of simple structure {SIMPLEST}, "
+        f"MGM = {mgm[SIMPLEST]:.4f} (a) and of complex structure {CHOSEN}, MGM = {mgm[CHOSEN]:.4f} (b).",
+        "Fig. 3. Dependences of PSNR-HVS-M (a,b), PSNR (c,d) and HaarPSI (e,f) on compression ratio (CR) for the "
+        f"fragments of simple structure {SIMPLEST}, MGM = {mgm[SIMPLEST]:.4f} (a,c,e) and complex structure {CHOSEN}, "
+        f"MGM = {mgm[CHOSEN]:.4f} (b,d,f); horizontal lines - the thresholds T = 40, 41 and 42 dB."]
+    assert captions[3:6] == [  # the forms of the task of cycle 22, renumbered in cycle 25
+        "Fig. 4. Dependences of PSNR-HVS-M on PCC for VVC (a), JPEG (b), HEIF (c) and AVIF (d) for the fragments of "
         f"simple structure {SIMPLEST} (solid lines) and complex structure {CHOSEN} (dashed lines); horizontal lines - "
         "the thresholds T = 40, 41 and 42 dB; in (a) the axes are limited to PCC ≥ 0 and 80 dB.",
-        f"Fig. 4. Threshold PCC at T = 42 dB versus MGM for the {len(built['fragments'])} fragments: VVC (a), JPEG (b), "
+        f"Fig. 5. Threshold PCC at T = 42 dB versus MGM for the {len(built['fragments'])} fragments: VVC (a), JPEG (b), "
         "HEIF (c) and AVIF (d); ρ - Spearman rank correlation.",
-        "Fig. 5. The effect r = CR(VVC) / CR(codec) (Hodges-Lehmann estimate) with its 95% CI for the patients (a) and "
+        "Fig. 6. The effect r = CR(VVC) / CR(codec) (Hodges-Lehmann estimate) with its 95% CI for the patients (a) and "
         "the whole images (b) at T = 40, 41 and 42 dB; n = 16; dashed line - r = 1."]
-    assert captions[5].startswith("Fig. 6. Dependences of the median CR at T = 42 dB (a) and of r = CR(VVC) / CR(codec)")
-    assert captions[6].startswith("Fig. 7. The fragment D08_r00_c04 with the largest MGM")
+    assert captions[6].startswith("Fig. 7. Dependences of the median CR at T = 42 dB (a) and of r = CR(VVC) / CR(codec)")
+    assert captions[7].startswith("Fig. 8. The fragment D08_r00_c04 with the largest MGM")
     for label, text in zip(labels, captions):
         rest = text.removeprefix(f"{label}. ")
         values = sorted((r[1] for r in index if r[0].startswith(f"Caption {label} / ")), key=len, reverse=True)

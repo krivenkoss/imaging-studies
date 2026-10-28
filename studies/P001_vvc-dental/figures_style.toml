@@ -44,7 +44,7 @@ color = "#7F7F7F"       # the threshold lines and r = 1 are grey
 line_40 = "dotted"
 line_41 = "dashed"
 line_42 = "solid"
-unity_line = "dashed"   # r = 1 on Fig. 3 (b)
+unity_line = "dashed"   # r = 1 on Fig. 6 and Fig. 7 (b)
 
 [figures]
 fig1_fragment_scale = 3       # Fig. 1, one row: in the PNG the image is 1 : 1, the fragments (b), (c) - repeated this many times
@@ -52,26 +52,28 @@ fig1_grid_color = "#56B4E9"   # the frames of the grid of the image (a)
 fig1_grid_width_pt = 0.5
 fig1_mark_color = "#D55E00"   # the frames and letters of the fragments (b), (c) on (a)
 fig1_mark_width_pt = 1.0
-fig2_width = "double"         # "column" or "double"
-fig2_height_cm = 12.0
-fig2_legend_columns = 7       # one legend above the four panels
-fig3_width = "double"         # Fig. 3, PSNR-HVS-M on PCC: a panel per codec, 2 x 2
-fig3_height_cm = 10.0
-fig3_simple_line = "solid"    # the fragment of simple structure of Fig. 2, in the colour of the codec
-fig3_complex_line = "dashed"  # the fragment of complex structure of Fig. 2
-fig3_legend = "best"          # the legend of the two fragments in every panel; the thresholds - one legend above
-fig3_vvc_ymax_db = 80         # panel (a) VVC: the top of the y axis, dB - the points above are cut (owner, cycle 23)
-fig3_pcc_min = 0              # every panel: the start of the PCC axis - QP below it cut, kept in the CSV (owner, cycle 24)
-fig4_width = "double"         # Fig. 4, the threshold PCC on MGM: a panel per codec in one row, markers without lines
-fig4_height_cm = 6.0
-fig5_width = "double"         # Fig. 5, the effect r with its CI: (a) the patients, (b) the whole images, markers and CI
+fig2_width = "column"         # Fig. 2, the fragments of the plots of Fig. 3 and Fig. 4: (a), (b) in one row (cycle 25)
+fig2_scale = 2                # in the PNG every fragment is repeated this many times; the dpi follows
+fig3_width = "double"         # Fig. 3, PSNR-HVS-M, PSNR and HaarPSI on CR: 3 x 2 panels; "column" or "double"
+fig3_height_cm = 18.0         # three rows of the height of the two rows of 12 cm before cycle 25
+fig3_legend_columns = 7       # one legend above the six panels
+fig4_width = "double"         # Fig. 4, PSNR-HVS-M on PCC: a panel per codec, 2 x 2
+fig4_height_cm = 10.0
+fig4_simple_line = "solid"    # the fragment of simple structure of Fig. 3, in the colour of the codec
+fig4_complex_line = "dashed"  # the fragment of complex structure of Fig. 3
+fig4_legend = "best"          # the legend of the two fragments in every panel; the thresholds - one legend above
+fig4_vvc_ymax_db = 80         # panel (a) VVC: the top of the y axis, dB - the points above are cut (owner, cycle 23)
+fig4_pcc_min = 0              # every panel: the start of the PCC axis - QP below it cut, kept in the CSV (owner, cycle 24)
+fig5_width = "double"         # Fig. 5, the threshold PCC on MGM: a panel per codec in one row, markers without lines
 fig5_height_cm = 6.0
-fig6_width = "column"         # Fig. 6 (Fig. 3 before cycle 22)
-fig6_height_cm = 10.0
-fig6_legend = "upper right"
-fig6_legend_columns = 2
-fig6_legend_headroom = 0.3    # the y axis of both panels goes higher by this share of its span - room for the legend
-fig7_scale = 2                # Fig. 7 (Fig. 4 before cycle 22): in the PNG every panel is repeated this many times
-                              # (the region - ZOOM times more)
-fig7_frame_color = "#D55E00"  # the frame of the region on the upper row
-fig7_frame_width_pt = 0.8
+fig6_width = "double"         # Fig. 6, the effect r with its CI: (a) the patients, (b) the whole images, markers and CI
+fig6_height_cm = 6.0
+fig7_width = "column"         # Fig. 7 (Fig. 3 before cycle 22, Fig. 6 before cycle 25)
+fig7_height_cm = 10.0
+fig7_legend = "upper right"
+fig7_legend_columns = 2
+fig7_legend_headroom = 0.3    # the y axis of both panels goes higher by this share of its span - room for the legend
+fig8_scale = 2                # Fig. 8 (Fig. 4 before cycle 22, Fig. 7 before cycle 25): in the PNG every panel is
+                              # repeated this many times (the region - ZOOM times more)
+fig8_frame_color = "#D55E00"  # the frame of the region on the upper row
+fig8_frame_width_pt = 0.8
