@@ -92,10 +92,19 @@ def show(value, fmt):
 
 
 class Source:
+    """A run file (JSON) or the style file (TOML): its name in the index, sha256 and data."""
     def __init__(self, name, path):
         self.name, self.path = name, Path(path)
         self.sha256 = sha256_file(path)
-        self.data = json.loads(self.path.read_text(encoding="utf-8"))
+        text = self.path.read_text(encoding="utf-8")
+        self.data = tomllib.loads(text) if self.path.suffix == ".toml" else json.loads(text)
+
+
+def load_style(path=STYLE_FILE):
+    """The style of figures_style.toml; under "file" - its Source, for an index row of a style key that is printed
+    (named by its path from the root above core, as SCRIPT)."""
+    source = Source(f"core/{Path(path).resolve().relative_to(ROOT).as_posix()}", path)
+    return {**source.data, "file": source}
 
 
 def cell(value, fmt, source, key, op="value"):
@@ -610,7 +619,8 @@ def fig3(e4, e5, style, plt):
     """Dependences of PSNR-HVS-M on PCC, a panel per codec, for the fragments of Fig. 2: the simple one with the line
     fig3_simple_line, the complex one with fig3_complex_line, both in the colour and with the small markers of the codec;
     the valid rows of E4 only (as Fig. 2), the x axis over the whole PCC range of the plan of E4; the threshold lines in
-    grey and their legend above the panels."""
+    grey and their legend above the panels. Panel (a) VVC: the y axis ends at fig3_vvc_ymax_db (owner, cycle 23) - the
+    points above it stay in the data and the CSV and are cut by the axis."""
     simple, complex_ = extreme_fragments(e5.data["analysis"]["complexity"]["fragments"])
     f, t = style["figures"], style["thresholds"]
     fig, axes = plt.subplots(2, 2, figsize=size(style, "fig3"), constrained_layout=True)
@@ -634,6 +644,8 @@ def fig3(e4, e5, style, plt):
         for level in e5.data["thresholds_db"]:
             ax.axhline(level, color=t["color"], linestyle=t[f"line_{level:.0f}"], linewidth=style["page"]["line_width_pt"],
                        label=f"T = {level:.0f} dB")
+        if c == "vtm":  # the top of the axis - the style key, the points above are cut by the axis; the bottom - automatic
+            ax.set_ylim(ax.get_ylim()[0], f["fig3_vvc_ymax_db"])
         values, path = (plan["vtm"]["f"], "header.plan.vtm.f") if c == "vtm" else (plan[c], f"header.plan.{c}")
         ax.set_xlim(min(values), max(values))
         series.append((f"Fig. 3 ({letter}) / x: PCC range", cell(f"{min(values)} to {max(values)}", "text", e4, path, "range")))
@@ -647,10 +659,12 @@ def fig3(e4, e5, style, plt):
     fig.legend(handles, [x.get_label() for x in handles], loc="outside upper center", ncols=len(handles))
     labels = [style["codecs"][c]["label"] for c in CODECS]
     th = [threshold(e5, x) for x in e5.data["thresholds_db"]]
+    top = cell(f["fig3_vvc_ymax_db"], "g", style["file"], "figures.fig3_vvc_ymax_db")
     caption = joined(f"Fig. 3. Dependences of PSNR-HVS-M on PCC for {labels[0]} (a), {labels[1]} (b), {labels[2]} (c) and "
                      f"{labels[3]} (d) for the fragments of simple structure ", cells[0], " (solid lines) and complex "
                      "structure ", cells[1], " (dashed lines); horizontal lines - the thresholds T = ", ("T 1", th[0]), ", ",
-                     ("T 2", th[1]), " and ", ("T 3", th[2]), " dB.")
+                     ("T 2", th[1]), " and ", ("T 3", th[2]), " dB; in (a) the axis is limited to ", ("axis top (a)", top),
+                     " dB.")
     return fig, data, series, style["page"]["dpi"], [], caption
 
 
@@ -971,7 +985,7 @@ def build(cache_root, papers_root, paths=None, style_file=STYLE_FILE, force=Fals
             raise RunRefusal(f"the run file {cache_root / name} does not exist")
     if sha256_file(cache_root / E4_FILE) != e4_pin:
         raise RunRefusal(f"{E4_FILE}: sha256 differs from the pinned {e4_pin}")
-    style = tomllib.loads(Path(style_file).read_text(encoding="utf-8"))
+    style = load_style(style_file)
     e4, e5, e6, tiles = (Source(name, cache_root / name) for name in (E4_FILE, E5_FILE, E6_FILE, TILES_FILE))
     paths = paths or {}
     _, picks = fig1_fragments(e5.data["analysis"]["complexity"]["fragments"])

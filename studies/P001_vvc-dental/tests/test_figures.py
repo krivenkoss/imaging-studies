@@ -15,7 +15,8 @@ D10 and fragment, and a coder of the test's own - no pixel of the data, no real 
   most markevery_max markers on a line; every series, threshold line and r = 1 has a legend entry; the labels of the
   logarithmic axes carry no "x 10^n";
 - Fig. 3: in every codec panel the two series are the valid E4 rows of the simple and the complex fragment of Fig. 2,
-  solid and dashed, over the PCC range of the plan; Fig. 4: per codec one point per fragment at (MGM, threshold PCC of
+  solid and dashed, over the PCC range of the plan, the y axis of (a) VVC up to the style key of 80 dB with the points
+  above it kept in the data and the CSV (cycle 23); Fig. 4: per codec one point per fragment at (MGM, threshold PCC of
   E5), small markers and no line, rho of E5 in the title; Fig. 5: 9 CI segments and 9 estimates per panel equal to
   the comparisons of E5 (patients) and the whole-image comparisons, the vertical line r = 1 (cycle 22);
 - Fig. 7: the upper row - the original and the reconstructions; the lower row - the region repeated 4 times by pixels
@@ -37,6 +38,7 @@ import json
 import math
 import re
 import statistics
+import tomllib
 import zipfile
 from pathlib import Path
 
@@ -119,7 +121,8 @@ def synthetic(cache):
                     file, recon = fake_coder(c, original, p)
                     file_sha, recon_sha = hashlib.sha256(file).hexdigest(), hashlib.sha256(recon.tobytes()).hexdigest()
                 rows.append({"unit": f["unit"], "codec": c, "param": p, "status": "valid", "cr_file": 2.0 + j + k / 10,
-                             "psnr_hvs_m_db": 50.0 - 0.7 * j - k / 5 - 10 * f["mgm"],  # every fragment a curve of its own
+                             "psnr_hvs_m_db": 50.0 - 0.7 * j - k / 5 - 10 * f["mgm"] + 40 * (c == "vtm" and j < 2),
+                             # every fragment a curve of its own; VVC at the two smallest QP above 80 dB (Fig. 3 (a))
                              "psnr_db": 45.0 - 0.6 * j - k / 4 - f["mgm"], "file_sha256": file_sha, "recon_sha256": recon_sha})
             rows.append({"unit": f["unit"], "codec": c, "param": 999, "status": "lossless", "cr_file": 1.5,
                          "psnr_hvs_m_db": "+inf", "psnr_db": "+inf", "file_sha256": "0" * 64, "recon_sha256": "0" * 64})
@@ -231,7 +234,7 @@ def sources(built):
 
 
 def style_of(fg):
-    return fg.tomllib.loads(fg.STYLE_FILE.read_text(encoding="utf-8"))
+    return fg.load_style()
 
 
 def read_csv(path):
@@ -524,6 +527,15 @@ def test_fig3_two_fragments_per_codec_solid_and_dashed_over_the_plan(drawn):
             assert matplotlib_colour(line.get_color()) == matplotlib_colour(style["codecs"][c]["color"]), (c, what)
         values = plan["vtm"]["f"] if c == "vtm" else plan[c]
         assert ax.get_xlim() == (min(values), max(values)), c
+        # the y axis: the bottom - matplotlib's automatic margin of 5 % over all the data of the panel, written again;
+        # the top - the same in (b)-(d), the style key of 80 dB in (a) (cycle 23), the points above it still in the data
+        ys = [y for x in ax.get_lines() for y in x.get_ydata()]
+        low, high = min(ys), max(ys)
+        assert ax.get_ylim()[0] == pytest.approx(low - 0.05 * (high - low)), c
+        if c == "vtm":
+            assert ax.get_ylim()[1] == style["figures"]["fig3_vvc_ymax_db"] == 80 < high, (ax.get_ylim(), high)
+        else:
+            assert ax.get_ylim()[1] == pytest.approx(high + 0.05 * (high - low)), c
     plt.close(fig)
 
 
@@ -814,9 +826,10 @@ def test_every_index_value_equals_its_key(built):
         if item["key"] == "constant":
             assert item["file"] == built["fg"].SCRIPT and item["op"] == "text"
             continue
-        path = built["cache"] / item["file"]
+        style = item["file"] == "core/studies/P001_vvc-dental/figures_style.toml"  # a style key printed (cycle 23)
+        path = STUDY / "figures_style.toml" if style else built["cache"] / item["file"]
         assert item["sha256"] == hashlib.sha256(path.read_bytes()).hexdigest(), item["id"]
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = (tomllib.loads if style else json.loads)(path.read_text(encoding="utf-8"))
         assert printed(apply(item["op"], resolve(data, item["key"])), item["format"]) == item["value"], item["id"]
         checked += 1
     assert checked > 200
@@ -859,7 +872,7 @@ def test_every_digit_of_the_captions_is_an_index_row(built):
     assert captions[2:5] == [  # the forms of the task of cycle 22
         "Fig. 3. Dependences of PSNR-HVS-M on PCC for VVC (a), JPEG (b), HEIF (c) and AVIF (d) for the fragments of "
         f"simple structure {SIMPLEST} (solid lines) and complex structure {CHOSEN} (dashed lines); horizontal lines - "
-        "the thresholds T = 40, 41 and 42 dB.",
+        "the thresholds T = 40, 41 and 42 dB; in (a) the axis is limited to 80 dB.",
         f"Fig. 4. Threshold PCC at T = 42 dB versus MGM for the {len(built['fragments'])} fragments: VVC (a), JPEG (b), "
         "HEIF (c) and AVIF (d); ρ - Spearman rank correlation.",
         "Fig. 5. The effect r = CR(VVC) / CR(codec) (Hodges-Lehmann estimate) with its 95% CI for the patients (a) and "
