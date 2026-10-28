@@ -11,14 +11,15 @@ order of their mention: Fig. 1 - the initial data, Fig. 2 - PSNR-HVS-M and PSNR 
 Fig. 4 - the threshold PCC on MGM, Fig. 5 - the effect r with its CI, Fig. 6 - CR and r on the MGM of the patient,
 Fig. 7 - against the original. All text is English with a decimal point; the codec is "VVC" (VTM only as the
 implementation in Table 1); lines of different colour and style carry small markers, Fig. 4 and Fig. 5 - small markers
-without lines (STUDY.md section 7, the owner's exception). Images: Fig. 1 - the image D10 of the copy data/P001 with its
-grid (B11), a typical fragment and a fragment of the owner's choice; Fig. 7 - the original fragment and the four codecs
-at the threshold of 42 dB from reconstructions encoded again with the wrappers of E4 (the function of run_e6.py), each
-equal to its E4 row by sha256 of the file and of the reconstruction, otherwise a refusal in words. The PDF carries every
-raster as it is; in the PNG every image panel lies on whole pixels and takes an integer multiple of its pixels (pixel
-repetition, checked after writing) - the dpi follows from that and is printed. Medical images stay outside Git. A number
-is never typed by hand. No file carries the time of the build: the PDF has no CreationDate, the xlsx has FIXED_DATE in
-its properties and zip entries - two runs write the same bytes.
+without lines (STUDY.md section 7, the owner's exception); an axis of PCC is labelled "PCC" without its meaning in
+brackets (that is in Table 1) and no x axis has a negative value (cycle 24). Images: Fig. 1 - the image D10 of the copy
+data/P001 with its grid (B11), a typical fragment and a fragment of the owner's choice; Fig. 7 - the original fragment
+and the four codecs at the threshold of 42 dB from reconstructions encoded again with the wrappers of E4 (the function
+of run_e6.py), each equal to its E4 row by sha256 of the file and of the reconstruction, otherwise a refusal in words.
+The PDF carries every raster as it is; in the PNG every image panel lies on whole pixels and takes an integer multiple
+of its pixels (pixel repetition, checked after writing) - the dpi follows from that and is printed. Medical images stay
+outside Git. A number is never typed by hand. No file carries the time of the build: the PDF has no CreationDate, the
+xlsx has FIXED_DATE in its properties and zip entries - two runs write the same bytes.
 """
 
 import argparse
@@ -618,9 +619,10 @@ def fig2(e4, e5, style, plt):
 def fig3(e4, e5, style, plt):
     """Dependences of PSNR-HVS-M on PCC, a panel per codec, for the fragments of Fig. 2: the simple one with the line
     fig3_simple_line, the complex one with fig3_complex_line, both in the colour and with the small markers of the codec;
-    the valid rows of E4 only (as Fig. 2), the x axis over the whole PCC range of the plan of E4; the threshold lines in
-    grey and their legend above the panels. Panel (a) VVC: the y axis ends at fig3_vvc_ymax_db (owner, cycle 23) - the
-    points above it stay in the data and the CSV and are cut by the axis."""
+    the valid rows of E4 only (as Fig. 2), the x axis from fig3_pcc_min to the largest PCC of the plan of E4 (owner,
+    cycle 24: the PCC axis from 0 - the points of VVC with QP below 0 stay in the data and the CSV and are cut by the
+    axis); the threshold lines in grey and their legend above the panels. Panel (a) VVC: the y axis ends at
+    fig3_vvc_ymax_db (owner, cycle 23) - the points above it stay in the data and the CSV and are cut by the axis."""
     simple, complex_ = extreme_fragments(e5.data["analysis"]["complexity"]["fragments"])
     f, t = style["figures"], style["thresholds"]
     fig, axes = plt.subplots(2, 2, figsize=size(style, "fig3"), constrained_layout=True)
@@ -647,10 +649,10 @@ def fig3(e4, e5, style, plt):
         if c == "vtm":  # the top of the axis - the style key, the points above are cut by the axis; the bottom - automatic
             ax.set_ylim(ax.get_ylim()[0], f["fig3_vvc_ymax_db"])
         values, path = (plan["vtm"]["f"], "header.plan.vtm.f") if c == "vtm" else (plan[c], f"header.plan.{c}")
-        ax.set_xlim(min(values), max(values))
+        ax.set_xlim(f["fig3_pcc_min"], max(values))
         series.append((f"Fig. 3 ({letter}) / x: PCC range", cell(f"{min(values)} to {max(values)}", "text", e4, path, "range")))
         ax.legend(handles=lines, loc=f["fig3_legend"])
-        ax.set_xlabel(f"PCC ({PCC_MEANING[c]})")
+        ax.set_xlabel("PCC")
         ax.set_ylabel("PSNR-HVS-M, dB")
         ax.set_title(f"({letter}) {s['label']}", loc="left")
     series.append(("Fig. 3 / threshold lines, dB", cell("; ".join(show(x, ".0f") for x in e5.data["thresholds_db"]), "text",
@@ -659,12 +661,13 @@ def fig3(e4, e5, style, plt):
     fig.legend(handles, [x.get_label() for x in handles], loc="outside upper center", ncols=len(handles))
     labels = [style["codecs"][c]["label"] for c in CODECS]
     th = [threshold(e5, x) for x in e5.data["thresholds_db"]]
+    start = cell(f["fig3_pcc_min"], "g", style["file"], "figures.fig3_pcc_min")
     top = cell(f["fig3_vvc_ymax_db"], "g", style["file"], "figures.fig3_vvc_ymax_db")
     caption = joined(f"Fig. 3. Dependences of PSNR-HVS-M on PCC for {labels[0]} (a), {labels[1]} (b), {labels[2]} (c) and "
                      f"{labels[3]} (d) for the fragments of simple structure ", cells[0], " (solid lines) and complex "
                      "structure ", cells[1], " (dashed lines); horizontal lines - the thresholds T = ", ("T 1", th[0]), ", ",
-                     ("T 2", th[1]), " and ", ("T 3", th[2]), " dB; in (a) the axis is limited to ", ("axis top (a)", top),
-                     " dB.")
+                     ("T 2", th[1]), " and ", ("T 3", th[2]), " dB; in (a) the axes are limited to PCC ≥ ",
+                     ("axis start PCC (a)", start), " and ", ("axis top (a)", top), " dB.")
     return fig, data, series, style["page"]["dpi"], [], caption
 
 
@@ -688,7 +691,7 @@ def fig4(e5, style, plt):
         rho = cell(a["rho"][i]["rho"], ".3f", e5, f"analysis.complexity.rho[{i}].rho")
         ax.set_title(f"({letter}) {s['label']}, ρ = {rho['value']}", loc="left")
         ax.set_xlabel("MGM")
-        ax.set_ylabel(f"Threshold PCC ({PCC_MEANING[c]}), {T_MAIN:.0f} dB")
+        ax.set_ylabel(f"Threshold PCC, {T_MAIN:.0f} dB")
         ax.yaxis.set_major_locator(MaxNLocator(integer=True))
         data += [{"panel": letter, "codec": c, "fragment": x["unit"], "mgm": x["mgm"], "threshold_pcc": x[field]}
                  for x in fragments]

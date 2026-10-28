@@ -61,6 +61,7 @@ fig3_simple_line = "solid"    # the fragment of simple structure of Fig. 2, in t
 fig3_complex_line = "dashed"  # the fragment of complex structure of Fig. 2
 fig3_legend = "best"          # the legend of the two fragments in every panel; the thresholds - one legend above
 fig3_vvc_ymax_db = 80         # panel (a) VVC: the top of the y axis, dB - the points above are cut (owner, cycle 23)
+fig3_pcc_min = 0              # every panel: the start of the PCC axis - QP below it cut, kept in the CSV (owner, cycle 24)
 fig4_width = "double"         # Fig. 4, the threshold PCC on MGM: a panel per codec in one row, markers without lines
 fig4_height_cm = 6.0
 fig5_width = "double"         # Fig. 5, the effect r with its CI: (a) the patients, (b) the whole images, markers and CI

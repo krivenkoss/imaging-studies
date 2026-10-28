@@ -13,10 +13,12 @@ D10 and fragment, and a coder of the test's own - no pixel of the data, no real 
 - the CSV of every figure equals the data of the run files; the series of Fig. 2 carry the data of their own codec;
 - every series of the plots is a line with markers: the marker size equals the style, is 2.5 pt and at most 4 pt, at
   most markevery_max markers on a line; every series, threshold line and r = 1 has a legend entry; the labels of the
-  logarithmic axes carry no "x 10^n";
+  logarithmic axes carry no "x 10^n"; an axis label with PCC has no brackets and no x axis of a plot has a negative
+  limit or tick label (cycle 24);
 - Fig. 3: in every codec panel the two series are the valid E4 rows of the simple and the complex fragment of Fig. 2,
-  solid and dashed, over the PCC range of the plan, the y axis of (a) VVC up to the style key of 80 dB with the points
-  above it kept in the data and the CSV (cycle 23); Fig. 4: per codec one point per fragment at (MGM, threshold PCC of
+  solid and dashed, the x axis from the style key of 0 to the largest PCC of the plan with the VVC points of QP below 0
+  kept in the data and the CSV (cycle 24), the y axis of (a) VVC up to the style key of 80 dB with the points above it
+  kept in the data and the CSV (cycle 23); Fig. 4: per codec one point per fragment at (MGM, threshold PCC of
   E5), small markers and no line, rho of E5 in the title; Fig. 5: 9 CI segments and 9 estimates per panel equal to
   the comparisons of E5 (patients) and the whole-image comparisons, the vertical line r = 1 (cycle 22);
 - Fig. 7: the upper row - the original and the reconstructions; the lower row - the region repeated 4 times by pixels
@@ -55,7 +57,7 @@ THRESHOLD_LABELS = {"T = 40 dB", "T = 41 dB", "T = 42 dB"}
 CYRILLIC = re.compile("[Ѐ-ӿ]")
 CHOSEN = "D08_r00_c04"  # the largest MGM of the synthetic fragments (ties with D16_r00_c04 - the smaller code)
 SIMPLEST = "D01_r00_c00"  # the smallest MGM (ties with D09_r00_c00 - the smaller code)
-THRESHOLD_PCC = {"vtm": 31, "jpeg": 67, "heif": 67, "avif": 67}  # the 12th point of every codec below
+THRESHOLD_PCC = {"vtm": 9, "jpeg": 67, "heif": 67, "avif": 67}  # the 12th point of every codec below
 D10_SHAPE = (1100, 2100)  # H, W of the synthetic D10: a grid of 2 x 4 fragments
 D10_MGM = (0.030, 0.035, 0.046, 0.050, 0.0437, 0.052, 0.055, 0.0405)  # its fragments r00_c00 ... r01_c03; the median
 # of all fragments (0.041) is none of them, so a caption that prints the MGM of a fragment for the median is seen; by
@@ -114,15 +116,16 @@ def synthetic(cache):
     rows, units = [], []
     for f in fragments:
         for k, c in enumerate(CODECS):
-            params = list(range(20, 41)) if c == "vtm" else list(range(100, 39, -3))
+            params = list(range(-2, 19)) if c == "vtm" else list(range(100, 39, -3))
             for j, p in enumerate(params):
                 file_sha = recon_sha = "0" * 64
                 if f["unit"] == CHOSEN and p == THRESHOLD_PCC[c]:
                     file, recon = fake_coder(c, original, p)
                     file_sha, recon_sha = hashlib.sha256(file).hexdigest(), hashlib.sha256(recon.tobytes()).hexdigest()
                 rows.append({"unit": f["unit"], "codec": c, "param": p, "status": "valid", "cr_file": 2.0 + j + k / 10,
-                             "psnr_hvs_m_db": 50.0 - 0.7 * j - k / 5 - 10 * f["mgm"] + 40 * (c == "vtm" and j < 2),
-                             # every fragment a curve of its own; VVC at the two smallest QP above 80 dB (Fig. 3 (a))
+                             "psnr_hvs_m_db": 50.0 - 0.7 * j - k / 5 - 10 * f["mgm"] + 40 * (c == "vtm" and j < 4),
+                             # every fragment a curve of its own; VVC at QP -2 to 1 above 80 dB, at QP -2 and -1 left
+                             # of the x axis (Fig. 3 (a))
                              "psnr_db": 45.0 - 0.6 * j - k / 4 - f["mgm"], "file_sha256": file_sha, "recon_sha256": recon_sha})
             rows.append({"unit": f["unit"], "codec": c, "param": 999, "status": "lossless", "cr_file": 1.5,
                          "psnr_hvs_m_db": "+inf", "psnr_db": "+inf", "file_sha256": "0" * 64, "recon_sha256": "0" * 64})
@@ -502,6 +505,29 @@ def test_log_axis_labels_are_plain_numbers(built):
         plt.close(fig)
 
 
+def test_pcc_axis_labels_without_brackets_and_no_negative_x(drawn):
+    """Owner, cycle 24: "PCC" on the plots without its meaning in brackets; no negative value on an x axis."""
+    fg = drawn["fg"]
+    style = style_of(fg)
+    e4, e5, _, _ = sources(drawn)
+    plt, _ = fg.setup(style)
+    figs = {"fig2": fg.fig2(e4, e5, style, plt)[0], "fig3": fg.fig3(e4, e5, style, plt)[0],
+            "fig4": fg.fig4(e5, style, plt)[0], "fig5": fg.fig5(e5, style, plt)[0], "fig6": fg.fig6(e5, style, plt)[0]}
+    pcc = []
+    for name, fig in figs.items():
+        fig.canvas.draw()
+        ticks = []
+        for ax in fig.axes:
+            pcc += [(name, label) for label in (ax.get_xlabel(), ax.get_ylabel()) if "PCC" in label]
+            low, high = sorted(ax.get_xlim())
+            assert low >= 0, (name, ax.get_xlim())
+            ticks += [t.get_text() for t in ax.get_xticklabels(which="both")  # the labels inside the axis - drawn
+                      if t.get_text() and low <= t.get_position()[0] <= high]
+        assert ticks and not any(t.startswith(("-", "−")) for t in ticks), (name, ticks)  # matplotlib's minus is U+2212
+        plt.close(fig)
+    assert pcc == [("fig3", "PCC")] * 4 + [("fig4", "Threshold PCC, 42 dB")] * 4  # no bracket, and none left out
+
+
 def drawn_plot(drawn, name):
     fg = drawn["fg"]
     style = style_of(fg)
@@ -526,7 +552,11 @@ def test_fig3_two_fragments_per_codec_solid_and_dashed_over_the_plan(drawn):
             assert line.get_linestyle() == dash and line.get_marker() == style["codecs"][c]["marker"], (c, what)
             assert matplotlib_colour(line.get_color()) == matplotlib_colour(style["codecs"][c]["color"]), (c, what)
         values = plan["vtm"]["f"] if c == "vtm" else plan[c]
-        assert ax.get_xlim() == (min(values), max(values)), c
+        # the x axis from the style key of 0 (cycle 24); in (a) the points of QP below 0 are still in the data
+        assert ax.get_xlim() == (style["figures"]["fig3_pcc_min"], max(values)) == (0, max(values)), c
+        assert ax.get_xlabel() == "PCC", c
+        if c == "vtm":
+            assert all(min(lines[name].get_xdata()) < 0 for name in FIG3_SERIES.values())
         # the y axis: the bottom - matplotlib's automatic margin of 5 % over all the data of the panel, written again;
         # the top - the same in (b)-(d), the style key of 80 dB in (a) (cycle 23), the points above it still in the data
         ys = [y for x in ax.get_lines() for y in x.get_ydata()]
@@ -872,7 +902,7 @@ def test_every_digit_of_the_captions_is_an_index_row(built):
     assert captions[2:5] == [  # the forms of the task of cycle 22
         "Fig. 3. Dependences of PSNR-HVS-M on PCC for VVC (a), JPEG (b), HEIF (c) and AVIF (d) for the fragments of "
         f"simple structure {SIMPLEST} (solid lines) and complex structure {CHOSEN} (dashed lines); horizontal lines - "
-        "the thresholds T = 40, 41 and 42 dB; in (a) the axis is limited to 80 dB.",
+        "the thresholds T = 40, 41 and 42 dB; in (a) the axes are limited to PCC ≥ 0 and 80 dB.",
         f"Fig. 4. Threshold PCC at T = 42 dB versus MGM for the {len(built['fragments'])} fragments: VVC (a), JPEG (b), "
         "HEIF (c) and AVIF (d); ρ - Spearman rank correlation.",
         "Fig. 5. The effect r = CR(VVC) / CR(codec) (Hodges-Lehmann estimate) with its 95% CI for the patients (a) and "
