@@ -1,16 +1,17 @@
 """Figures, tables and captions of the paper P001 from the run files of E4, E5, E6 and the grid of cycle 9 - one command. Run: python studies/P001_vvc-dental/figures.py   (--force: overwrite files that exist)
 
-Reads <cache_root>/cycles/13/e4_main.json (pinned sha256), cycles/17/e5_analysis.json, cycles/16/e6_pages.json and
-cycles/9/p001_tiles.json, the copy data/P001 (Fig. 1, Fig. 2 and Fig. 8) and the style figures_style.toml beside this
-script; writes into <papers_root>/P001_vvc-dental/: figures/fig1..fig8 (.pdf, .png, .csv of the plotted data - no
-pixel), figures/captions.txt (the captions of the figures and the titles of the tables), tables/table1..table3 (.xlsx,
-.csv) and tables/numbers_index.csv - every number of every table cell, figure series and caption: the value as printed,
-the run file (relative to cache_root), its sha256, the key in the file, the operation and the format (the source of
-NUMBERS.md). The composition is the one declared in the tasks of cycles 19, 22 and 25; the figures are numbered in the
-order of their mention (cycle 25): Fig. 1 - the initial data, Fig. 2 - the fragments of the plots, Fig. 3 - PSNR-HVS-M,
-PSNR and HaarPSI on CR, Fig. 4 - PSNR-HVS-M on PCC, Fig. 5 - the threshold PCC on MGM, Fig. 6 - the effect r with its
-CI, Fig. 7 - CR and r on the MGM of the patient, Fig. 8 - against the original (FIGURES; Fig. 8 named in the caption of
-Fig. 2 takes its number from there, cycle 26). All text is English with a decimal
+Reads <cache_root>/cycles/13/e4_main.json (pinned sha256), cycles/17/e5_analysis.json, cycles/16/e6_pages.json,
+cycles/9/p001_tiles.json, cycles/26/e5_fixed.json (pinned sha256; Table 4 only, cycle 27), the copy data/P001 (Fig. 1,
+Fig. 2 and Fig. 8) and the style figures_style.toml beside this script; writes into <papers_root>/P001_vvc-dental/:
+figures/fig1..fig8 (.pdf, .png, .csv of the plotted data - no pixel), figures/captions.txt (the captions of the figures
+and the titles of the tables), tables/table1..table4 (.xlsx, .csv) and tables/numbers_index.csv - every number of every
+table cell (and of the head of Table 4), figure series and caption: the value as printed, the run file (relative to
+cache_root), its sha256, the key in the file, the operation and the format (the source of NUMBERS.md). The composition
+is the one declared in the tasks of cycles 19, 22, 25 and 27; the figures are numbered in the order of their mention
+(cycle 25): Fig. 1 - the initial data, Fig. 2 - the fragments of the plots, Fig. 3 - PSNR-HVS-M, PSNR and HaarPSI on
+CR, Fig. 4 - PSNR-HVS-M on PCC, Fig. 5 - the threshold PCC on MGM, Fig. 6 - the effect r with its CI, Fig. 7 - CR and r
+on the MGM of the patient, Fig. 8 - against the original (FIGURES; the figures named in the caption of Fig. 2 take
+their numbers from there, cycles 26 and 27). All text is English with a decimal
 point; the codec is "VVC" (VTM only as the implementation in Table 1); lines of different colour and style carry small
 markers, Fig. 5 and Fig. 6 - small markers without lines (STUDY.md section 7, the owner's exception); an axis of PCC is
 labelled "PCC" without its meaning in brackets (that is in Table 1) and no x axis has a negative value (cycle 24).
@@ -49,6 +50,8 @@ PAPER = "P001_vvc-dental"
 E4_FILE, E5_FILE, E6_FILE = "cycles/13/e4_main.json", "cycles/17/e5_analysis.json", "cycles/16/e6_pages.json"
 TILES_FILE = "cycles/9/p001_tiles.json"
 E4_SHA256 = "44a1733512fdfbb9d02d210ff81d492b9a5d929ec8d547d84676d47350875f2a"  # A12
+FIXED_FILE = "cycles/26/e5_fixed.json"  # the addendum E5 (STUDY.md section 7): Table 4 only
+FIXED_SHA256 = "53e0f489b7ffeb7faa9c3f7f536ffb28615882b3e64fb57b419a67ff4423f464"  # A24
 SCRIPT = "core/studies/P001_vvc-dental/figures.py"
 CODECS = ("vtm", "jpeg", "heif", "avif")
 OTHERS = ("jpeg", "heif", "avif")
@@ -75,7 +78,7 @@ CONTAINER = {"vtm": "HEIF (vvc1)", "jpeg": "JFIF", "heif": "HEIF (hvc1)", "avif"
 FIGURES = ("initial data", "fragments of the plots", "metrics on CR", "PSNR-HVS-M on PCC", "threshold PCC on MGM",
            "effect r", "CR and r on MGM", "against the original")  # the order of mention: Fig. n is FIGURES[n - 1]
 OUTPUTS = [f"figures/fig{k}.{ext}" for k in range(1, 9) for ext in ("pdf", "png", "csv")] + ["figures/captions.txt"] + \
-          [f"tables/table{k}.{ext}" for k in (1, 2, 3) for ext in ("xlsx", "csv")] + ["tables/numbers_index.csv"]
+          [f"tables/table{k}.{ext}" for k in (1, 2, 3, 4) for ext in ("xlsx", "csv")] + ["tables/numbers_index.csv"]
 INDEX_COLUMNS = ("id", "value", "file", "sha256", "key", "op", "format")
 PDF_METADATA = {"CreationDate": None}  # no time of the build in the PDF (owner, cycle 21)
 FIXED_DATE = (1980, 1, 1, 0, 0, 0)  # the xlsx: created, modified, every zip entry - the first zip date (owner, cycle 21)
@@ -321,13 +324,18 @@ def table2(e5, style):
     return head, rows, [note], title
 
 
-def spread(source, key, values, centre, low, high, fmt):
-    """"median (low-high)" of the values under the key: low and high - quartiles or min and max."""
+def spread_pieces(source, key, values, centre, low, high, fmt, what=""):
+    """The pieces of "median (low-high)" of the values under the key: low and high - quartiles or min and max; the
+    names of the parts begin with `what` (two such groups in one cell, Table 4)."""
     stat = {"median": lambda: percentile(values, 50), "q25": lambda: percentile(values, 25),
             "q75": lambda: percentile(values, 75), "min": lambda: min(values), "max": lambda: max(values)}
-    return joined((centre, cell(stat[centre](), fmt, source, key, centre)), " (",
-                  (low, cell(stat[low](), fmt, source, key, low)), "–", (high, cell(stat[high](), fmt, source, key, high)),
-                  ")")
+    return [(f"{what}{centre}", cell(stat[centre](), fmt, source, key, centre)), " (",
+            (f"{what}{low}", cell(stat[low](), fmt, source, key, low)), "–",
+            (f"{what}{high}", cell(stat[high](), fmt, source, key, high)), ")"]
+
+
+def spread(source, key, values, centre, low, high, fmt):
+    return joined(*spread_pieces(source, key, values, centre, low, high, fmt))
 
 
 def table3(e5, style):
@@ -385,6 +393,67 @@ def table3(e5, style):
                    " fragments; at JPEG PCC ", ("JPEG point again", constant(JPEG50_PCC)),
                    " - the share of the units with PSNR-HVS-M ≥ ", ("T again", threshold(e5, T_MAIN)), " dB.")
     return head, rows, [], title
+
+
+def table4(fx, style):
+    """The addendum E5 (STUDY.md section 7; owner, cycle 27), from the records of e5_fixed.json only: by codec the fixed
+    PCC; CR at it over the patients, median (q25-q75); CR fixed / CR own and r_fix = CR(VVC) / CR(codec), median
+    (min-max), for the patients and the whole images; the count of r_fix > 1. The numbers of the head are index rows as
+    well; the note says every unit is at or above T - any unit below it is a refusal."""
+    a = fx.data["analysis"]
+    vvc = style["codecs"]["vtm"]["label"]
+    if any(x["below"] for x in a["below"]):
+        raise RunRefusal("Table 4: a unit lies below T at the fixed PCC in e5_fixed.json - the note would be false")
+    levels = (("patients", "пациенты", "patients"), ("whole images", "снимки", "whole"))
+    rows = []
+    for c in CODECS:
+        crs = [p["cr_fix"] for p in pick(a["patients"], codec=c)]
+        losses = {}
+        for what, level, listname in levels:
+            losses[what] = [x["loss"] for x in pick(a[listname], codec=c)]
+            if None in losses[what]:
+                raise RunRefusal(f"Table 4: {c} has a {what} entry without a loss in e5_fixed.json")
+        loss = joined(*spread_pieces(fx, f"analysis.patients[codec={c}].loss", losses["patients"], "median", "min", "max",
+                                     ".3f", "patients "), "; ",
+                      *spread_pieces(fx, f"analysis.whole[codec={c}].loss", losses["whole images"], "median", "min",
+                                     "max", ".3f", "whole images "))
+        if c == "vtm":
+            r_fix = above = constant("-")
+        else:
+            pieces, counts = [], []
+            for k, (what, level, _) in enumerate(levels):
+                where = dict(level=level, pair=f"vtm/{c}")
+                pieces += (["; "] if k else []) + spread_pieces(
+                    fx, f"analysis.ratios[{where_text(**where)}].r_fix", [x["r_fix"] for x in pick(a["ratios"], **where)],
+                    "median", "min", "max", ".3f", f"{what} ")
+                i = position(a["summary"], level=level, what="r_fix", codec=f"vtm/{c}")
+                counts += (["; "] if k else []) + [(what, cell(a["summary"][i]["above_1"], "d", fx,
+                                                               f"analysis.summary[{i}].above_1"))]
+            r_fix, above = joined(*pieces), joined(*counts)
+        rows.append([constant(style["codecs"][c]["label"]), cell(a["fixed_pcc"][c], "d", fx, f"analysis.fixed_pcc.{c}"),
+                     spread(fx, f"analysis.patients[codec={c}].cr_fix", crs, "median", "q25", "q75", ".2f"), loss, r_fix,
+                     above])
+    n_patients = cell(same([s["n"] for s in pick(a["summary"], level="пациенты")], "n of patients"), "d", fx,
+                      "analysis.summary[level=пациенты].n", "same")
+    n_ratios = cell(same([s["n"] for s in pick(a["summary"], what="r_fix")], "n of r_fix"), "d", fx,
+                    "analysis.summary[what=r_fix].n", "same")
+    head = ("Codec", "Fixed PCC",
+            joined("CR at the fixed PCC, median (q", ("lower quartile", constant("25")), "–q", ("upper quartile",
+                   constant("75")), "), n = ", ("n patients", n_patients), " patients"),
+            "CR fixed / CR own, median (min–max): patients; whole images",
+            f"r_fix = CR({vvc}) / CR(codec), median (min–max): patients; whole images",
+            joined("r_fix > ", ("reference r", constant("1")), ", of ", ("n", n_ratios), ": patients; whole images"))
+    t = cell(fx.data["t_db"], ".0f", fx, "t_db")
+    note = joined("Note. PSNR-HVS-M ≥ ", ("T", t), " dB for all ",
+                  ("n fragments", cell(same([x["n"] for x in pick(a["below"], level="фрагменты")], "n of fragments"), "d",
+                                       fx, "analysis.below[level=фрагменты].n", "same")), " fragments and ",
+                  ("n whole images", cell(same([x["n"] for x in pick(a["below"], level="снимки")], "n of whole images"),
+                                          "d", fx, "analysis.below[level=снимки].n", "same")),
+                  " whole images at the fixed PCC of every codec; descriptive analysis, declared after the main results.")
+    title = joined("Table 4. At one fixed PCC per codec for all units: CR over n = ", ("n patients", n_patients),
+                   " patients; the ratio of CR at the fixed PCC to CR at the threshold PCC of the unit for T = ", ("T", t),
+                   f" dB and r_fix = CR({vvc}) / CR(codec) for the patients and the whole images.")
+    return head, rows, [note], title
 
 
 # ---------------------------------------------------------------- figures: common
@@ -623,8 +692,8 @@ def fig2(e5, tiles, arrays, style, plt, compared):
     size_cell = cell(tile, "d", tiles, "parameters.tile")
     cells = [fragment_cells(e5, x["unit"], what) for x, what in zip(picks, ("simple", "complex"))]
     series = [("Fig. 2 / fragment side, pixels", size_cell)] + [(f"Fig. 2 / {name}", c) for pair in cells for name, c in pair]
-    caption = joined("Fig. 2. The fragments of the plots of Figs. ", ("plots, first figure", constant("3")), " and ",
-                     ("plots, second figure", constant("4")), ", ", ("fragment width", size_cell), " × ",
+    caption = joined("Fig. 2. The fragments of the plots of Figs. ", ("plots, first figure", figure_number("metrics on CR")),
+                     " and ", ("plots, second figure", figure_number("PSNR-HVS-M on PCC")), ", ", ("fragment width", size_cell), " × ",
                      ("fragment height", size_cell), " pixels: of simple structure ", cells[0][0], ", MGM = ", cells[0][1],
                      " (a) and of complex structure ", cells[1][0], ", MGM = ", cells[1][1], " (b), the same fragment as "
                      "in Fig. ", ("same fragment, figure", figure_number("against the original")), ".")
@@ -1018,7 +1087,8 @@ def write_table(folder, n, head, rows, notes, index):
     from openpyxl import Workbook
     from openpyxl.writer.excel import ExcelWriter
 
-    printed = [list(head)] + [[c["value"] for c in r] for r in rows] + [[c["value"]] for c in notes]
+    names = [h["value"] if isinstance(h, dict) else h for h in head]  # a head with numbers is a cell (Table 4)
+    printed = [names] + [[c["value"] for c in r] for r in rows] + [[c["value"]] for c in notes]
     write_csv(folder / f"table{n}.csv", printed)
     wb = Workbook()
     ws = wb.active
@@ -1033,27 +1103,32 @@ def write_table(folder, n, head, rows, notes, index):
     with zipfile.ZipFile(raw) as book, zipfile.ZipFile(folder / f"table{n}.xlsx", "w", zipfile.ZIP_DEFLATED) as out:
         for entry in book.infolist():
             out.writestr(zipfile.ZipInfo(entry.filename, FIXED_DATE), book.read(entry.filename), zipfile.ZIP_DEFLATED)
+    for k, h in enumerate(head, start=1):
+        if isinstance(h, dict):
+            index += index_rows(f"Table {n} / head / {k}", h)
     for r, line_ in enumerate(rows, start=1):
         for k, c in enumerate(line_):
-            index += index_rows(f"Table {n} / row {r} / {head[k]}", c)
+            index += index_rows(f"Table {n} / row {r} / {names[k]}", c)
     for c in notes:
         index += index_rows(f"Table {n} / note", c)
 
 
-def build(cache_root, papers_root, paths=None, style_file=STYLE_FILE, force=False, e4_pin=E4_SHA256, log=print):
+def build(cache_root, papers_root, paths=None, style_file=STYLE_FILE, force=False, e4_pin=E4_SHA256,
+          fixed_pin=FIXED_SHA256, log=print):
     """`paths` - the lab paths of run_e4.load_paths (data_root and the coders) for Fig. 1, Fig. 2 and Fig. 8."""
     cache_root, out = Path(cache_root), Path(papers_root) / PAPER
     targets = [out / p for p in OUTPUTS]
     existing = [str(p.relative_to(out)) for p in targets if p.exists()]
     if existing and not force:
         raise RunRefusal(f"{len(existing)} files exist ({existing[:3]}...): --force overwrites them")
-    for name in (E4_FILE, E5_FILE, E6_FILE, TILES_FILE):
+    for name in (E4_FILE, E5_FILE, E6_FILE, TILES_FILE, FIXED_FILE):
         if not (cache_root / name).is_file():
             raise RunRefusal(f"the run file {cache_root / name} does not exist")
-    if sha256_file(cache_root / E4_FILE) != e4_pin:
-        raise RunRefusal(f"{E4_FILE}: sha256 differs from the pinned {e4_pin}")
+    for name, pin in ((E4_FILE, e4_pin), (FIXED_FILE, fixed_pin)):
+        if sha256_file(cache_root / name) != pin:
+            raise RunRefusal(f"{name}: sha256 differs from the pinned {pin}")
     style = load_style(style_file)
-    e4, e5, e6, tiles = (Source(name, cache_root / name) for name in (E4_FILE, E5_FILE, E6_FILE, TILES_FILE))
+    e4, e5, e6, tiles, fx = (Source(name, cache_root / name) for name in (E4_FILE, E5_FILE, E6_FILE, TILES_FILE, FIXED_FILE))
     paths = paths or {}
     _, picks = fig1_fragments(e5.data["analysis"]["complexity"]["fragments"])
     plotted = extreme_fragments(e5.data["analysis"]["complexity"]["fragments"])  # Fig. 2
@@ -1094,7 +1169,8 @@ def build(cache_root, papers_root, paths=None, style_file=STYLE_FILE, force=Fals
         log(f"  fig{n}.png: {dpi} dpi, {width} x {height} pixels ({width / dpi * 2.54:.2f} x {height / dpi * 2.54:.2f} cm)"
             + (f"; image panels pixel for pixel: {len(panels)} - " + ", ".join(f"{q['panel']} x{q['scale']}" for q in panels)
                if panels else ""))
-    for n, (head, rows, notes, title) in enumerate((table1(e4, style), table2(e5, style), table3(e5, style)), 1):
+    for n, (head, rows, notes, title) in enumerate((table1(e4, style), table2(e5, style), table3(e5, style),
+                                                    table4(fx, style)), 1):
         write_table(out / "tables", n, head, rows, notes, index)
         captions.append((f"Table {n}", title))
     for name, c in captions:
@@ -1108,7 +1184,7 @@ def build(cache_root, papers_root, paths=None, style_file=STYLE_FILE, force=Fals
     log(f"Fig. 8: {unit}, region - block row {r}, column {c} of {BLOCKS} x {BLOCKS} (MGM {value:.6f}); encoded again and "
         f"equal to E4: {len(recons)} of {len(CODECS)}")
     log(f"Inputs: {E4_FILE} sha256 {e4.sha256}; {E5_FILE} sha256 {e5.sha256}; {E6_FILE} sha256 {e6.sha256}; "
-        f"{TILES_FILE} sha256 {tiles.sha256}")
+        f"{TILES_FILE} sha256 {tiles.sha256}; {FIXED_FILE} sha256 {fx.sha256}")
     return out, index
 
 

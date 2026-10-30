@@ -14,7 +14,11 @@ D10 and fragment, and a coder of the test's own - no pixel of the data, no real 
   pixels of the loader (the grid) without interpolation, one row, the letters below the row and not over the images;
   its caption names (b) the same fragment as Fig. 8 by the number of the figure against the original in the numbering
   of the build - a reordered numbering moves it, a build whose captions disagree with the numbering is refused, and a
-  figure against the original of another fragment is refused (cycle 26);
+  figure against the original of another fragment is refused (cycle 26); "Figs. 3 and 4" of the caption take their
+  numbers from the numbering as well (cycle 27);
+- Table 4 (cycle 27): every cell equals the records of e5_fixed.json computed again by the test's own median and
+  quartiles; the VVC row has "-" for r_fix; every digit of its head, cells and note belongs to an index row of Table 4;
+  a unit below T in the run file is refused;
 - the CSV of every figure equals the data of the run files; the series of Fig. 3 carry the data of their own codec;
   Fig. 3 has six panels, (e), (f) - HaarPSI of E4 on CR without threshold lines (cycle 25), its caption places the
   threshold lines in (a,b) (cycle 26);
@@ -58,7 +62,8 @@ pytestmark = pytest.mark.lab
 
 STUDY = Path(__file__).resolve().parents[1]
 CODECS = ("vtm", "jpeg", "heif", "avif")
-LABELS = {"vtm": "VVC", "jpeg": "JPEG", "heif": "HEIF", "avif": "AVIF"}
+OTHER_CODECS = CODECS[1:]
+LABELS ={"vtm": "VVC", "jpeg": "JPEG", "heif": "HEIF", "avif": "AVIF"}
 PAIR_LABELS = {"vtm/jpeg": "VVC / JPEG", "vtm/heif": "VVC / HEIF", "vtm/avif": "VVC / AVIF"}
 THRESHOLD_LABELS = {"T = 40 dB", "T = 41 dB", "T = 42 dB"}
 CYRILLIC = re.compile("[Ѐ-ӿ]")
@@ -74,6 +79,9 @@ OWNER_C = "D10_r00_c02"  # Fig. 1 (c): the owner's choice, task of cycle 21
 FRAGMENT_RHO = (0.7619, -0.98246, 0.2453, -0.95)  # rho of the threshold PCC on MGM by codec; -0.95 is printed -0.950
 RHO_PRINTED = ("0.762", "-0.982", "0.245", "-0.950")
 FIG4_SERIES = {"simple": f"simple, {SIMPLEST}", "complex": f"complex, {CHOSEN}"}  # the line labels of Fig. 4
+NAMED = {"FIGURES[2]": "Dependences of PSNR-HVS-M (a,b), PSNR (c,d) and HaarPSI (e,f) on compression ratio",
+         "FIGURES[3]": "Dependences of PSNR-HVS-M on PCC", "FIGURES[7]": f"The fragment {CHOSEN} with the largest MGM"}
+# the figures named in the caption of Fig. 2 by the key of their number (cycles 26, 27) - known by their own captions
 
 
 @pytest.fixture(scope="module")
@@ -117,6 +125,37 @@ def b11_grid(height, width, tile=512):
 def fake_coder(codec, image, pcc):
     step = CODECS.index(codec) + 2
     return f"{codec}:{pcc}".encode() + image[:2, :8].tobytes(), (image // step) * step
+
+
+FIXED_PCC = {"vtm": 25, "jpeg": 57, "heif": 43, "avif": 66}
+
+
+def fixed_run(images, n_fragments):
+    """The fields of e5_fixed.json that Table 4 reads: per patient and per whole image the CR at the fixed PCC and the
+    loss, r_fix per image, the summary (n, r_fix > 1 counted here) and the units below T (none); the patients and the
+    whole images differ in every quantity."""
+    patients, whole, ratios = [], [], []
+    for i, im in enumerate(images):
+        for k, c in enumerate(CODECS):
+            patients.append({"level": "пациенты", "image": im, "codec": c, "n": 5, "own_n": 5,
+                             "cr_fix": 9.0 + 0.37 * ((i * 7 + k * 3) % 16) + k, "cr_own": 12.0,
+                             "loss": 0.7 + 0.013 * ((i * 5 + k) % 16)})
+            whole.append({"level": "снимки", "image": im, "codec": c, "n": 1, "own_n": 1, "cr_fix": 11.0 + i / 4 + k,
+                          "cr_own": 13.0, "loss": 0.75 + 0.011 * ((i * 3 + k * 2) % 16)})
+            if c != "vtm":
+                ratios += [{"level": "пациенты", "image": im, "pair": f"vtm/{c}", "r_fix": 0.9 + 0.02 * ((i * 3 + k) % 16)},
+                           {"level": "снимки", "image": im, "pair": f"vtm/{c}", "r_fix": 0.95 + 0.015 * ((i * 5 + k * 2) % 16)}]
+    summary = []
+    for level in ("пациенты", "снимки"):
+        summary += [{"level": level, "what": "потеря «фиксированный / свой»", "codec": c, "n": len(images), "above_1": None}
+                    for c in CODECS]
+        summary += [{"level": level, "what": "r_fix", "codec": f"vtm/{c}", "n": len(images),
+                     "above_1": sum(x["r_fix"] > 1 for x in ratios if x["level"] == level and x["pair"] == f"vtm/{c}")}
+                    for c in OTHER_CODECS]
+    below = [{"level": lv, "codec": c, "n": n, "below": 0, "units": [], "images": []}
+             for lv, n in (("фрагменты", n_fragments), ("снимки", len(images))) for c in CODECS]
+    return {"t_db": 42.0, "analysis": {"fixed_pcc": FIXED_PCC, "patients": patients, "whole": whole, "ratios": ratios,
+                                       "summary": summary, "below": below}}
 
 
 def synthetic(cache):
@@ -202,7 +241,8 @@ def synthetic(cache):
              "rows": [{"tile": unit, "code": "D10", "r": int(unit[5:7]), "c": int(unit[9:11]), "x": x, "y": y}
                       for unit, (x, y) in sorted(grid.items())]}
     for name, data in (("cycles/13/e4_main.json", e4), ("cycles/17/e5_analysis.json", e5),
-                       ("cycles/16/e6_pages.json", e6), ("cycles/9/p001_tiles.json", tiles)):
+                       ("cycles/16/e6_pages.json", e6), ("cycles/9/p001_tiles.json", tiles),
+                       ("cycles/26/e5_fixed.json", fixed_run(images, len(fragments)))):
         (cache / name).parent.mkdir(parents=True, exist_ok=True)
         (cache / name).write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     arrays = {CHOSEN: original, SIMPLEST: simple_fragment(), "D10": whole}
@@ -231,10 +271,11 @@ def built(fg, tmp_path, monkeypatch):
     cache, papers = tmp_path / "cache", tmp_path / "papers"
     e4, e5, fragments, arrays = synthetic(cache)
     coders(fg, monkeypatch, arrays)
-    pin = hashlib.sha256((cache / "cycles/13/e4_main.json").read_bytes()).hexdigest()
-    out, index = fg.build(cache, papers, paths={"cache_root": cache}, e4_pin=pin, log=lambda *a: None)
+    pins = {key: hashlib.sha256((cache / name).read_bytes()).hexdigest()
+            for key, name in (("e4_pin", "cycles/13/e4_main.json"), ("fixed_pin", "cycles/26/e5_fixed.json"))}
+    out, index = fg.build(cache, papers, paths={"cache_root": cache}, **pins, log=lambda *a: None)
     return {"fg": fg, "cache": cache, "papers": papers, "out": out, "e4": e4, "e5": e5, "fragments": fragments,
-            "pin": pin, "arrays": arrays, "monkeypatch": monkeypatch}
+            "pins": pins, "arrays": arrays, "monkeypatch": monkeypatch}
 
 
 @pytest.fixture()
@@ -271,9 +312,9 @@ def test_files_created_and_existing_files_need_force(fg, built):
     for name in fg.OUTPUTS:
         assert (built["out"] / name).is_file() and (built["out"] / name).stat().st_size > 0, name
     with pytest.raises(fg.RunRefusal, match="--force overwrites them"):
-        fg.build(built["cache"], built["papers"], paths={"cache_root": built["cache"]}, e4_pin=built["pin"],
+        fg.build(built["cache"], built["papers"], paths={"cache_root": built["cache"]}, **built["pins"],
                  log=lambda *a: None)
-    fg.build(built["cache"], built["papers"], paths={"cache_root": built["cache"]}, e4_pin=built["pin"], force=True,
+    fg.build(built["cache"], built["papers"], paths={"cache_root": built["cache"]}, **built["pins"], force=True,
              log=lambda *a: None)
     assert not list(built["cache"].glob("p001_figures_*"))  # the work folder of the coders is removed
 
@@ -282,11 +323,11 @@ def test_two_builds_write_the_same_bytes_and_no_time_of_the_build(built, tmp_pat
     from openpyxl import load_workbook
 
     fg = built["fg"]
-    again, _ = fg.build(built["cache"], tmp_path / "again", paths={"cache_root": built["cache"]}, e4_pin=built["pin"],
+    again, _ = fg.build(built["cache"], tmp_path / "again", paths={"cache_root": built["cache"]}, **built["pins"],
                         log=lambda *a: None)
     digest = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()  # noqa: E731
     first, second = ({name: digest(out / name) for name in fg.OUTPUTS} for out in (built["out"], again))
-    assert first == second and len(first) == 32
+    assert first == second and len(first) == 34
     trim = lambda row: row[:max([k + 1 for k, v in enumerate(row) if v != ""], default=0)]  # noqa: E731
     checked = {".pdf": 0, ".xlsx": 0}
     for name in fg.OUTPUTS:
@@ -306,7 +347,7 @@ def test_two_builds_write_the_same_bytes_and_no_time_of_the_build(built, tmp_pat
         else:
             continue
         checked[path.suffix] += 1
-    assert checked == {".pdf": 8, ".xlsx": 3}
+    assert checked == {".pdf": 8, ".xlsx": 4}
 
 
 def test_fragment_choice_by_the_rules_with_ties(fg):
@@ -608,9 +649,10 @@ def test_fig2_the_fragments_of_the_plots_pixel_for_pixel_and_letters_below(drawn
 
 
 def test_fig2_names_the_figure_against_the_original_by_the_numbering(built):
-    """Fig. 2 (task of cycle 26): the number of the figure against the original in the caption of Fig. 2 is the number
-    the build gives that figure - with the order of mention reversed for the last two figures, the caption names Fig. 7
-    and the build refuses captions that keep their old numbers; a figure against the original of another fragment than
+    """Fig. 2 (tasks of cycles 26 and 27): the numbers of the figures of the plots and of the figure against the original
+    in the caption of Fig. 2 are the numbers the build gives those figures - with the plots of Fig. 3 and Fig. 4 swapped
+    in the order of mention the caption names "Figs. 4 and 3"; with the last two figures swapped it names Fig. 7, and
+    the build refuses captions that keep their old numbers; a figure against the original of another fragment than
     Fig. 2 (b) is refused."""
     fg, monkeypatch = built["fg"], built["monkeypatch"]
     style = style_of(fg)
@@ -619,21 +661,29 @@ def test_fig2_names_the_figure_against_the_original_by_the_numbering(built):
     caption = lambda compared: fg.fig2(e5, tiles, built["arrays"], style, plt, compared)  # noqa: E731
     first = caption(CHOSEN)
     mgm = {f["unit"]: f["mgm"] for f in built["fragments"]}
+    assert first[5]["value"].startswith("Fig. 2. The fragments of the plots of Figs. 3 and 4, ")
     assert first[5]["value"].endswith(f"{CHOSEN}, MGM = {mgm[CHOSEN]:.4f} (b), the same fragment as in Fig. 8.")
     plt.close(first[0])
     with pytest.raises(fg.RunRefusal, match=f"Fig. 2 \\(b\\) is {CHOSEN}, the figure against the original shows "
                                             f"{SIMPLEST}: the caption names them the same fragment"):
         caption(SIMPLEST)
     order = list(fg.FIGURES)
-    assert order[7] == "against the original"
+    assert order[2:4] == ["metrics on CR", "PSNR-HVS-M on PCC"] and order[7] == "against the original"
+    plots = order[:2] + order[3:1:-1] + order[4:]
+    monkeypatch.setattr(fg, "FIGURES", tuple(plots))
+    swapped = caption(CHOSEN)
+    assert swapped[5]["value"].startswith("Fig. 2. The fragments of the plots of Figs. 4 and 3, ")
+    assert swapped[5]["value"].endswith(" (b), the same fragment as in Fig. 8.")
+    plt.close(swapped[0])
     order[6], order[7] = order[7], order[6]
     monkeypatch.setattr(fg, "FIGURES", tuple(order))
     moved = caption(CHOSEN)
+    assert moved[5]["value"].startswith("Fig. 2. The fragments of the plots of Figs. 3 and 4, ")
     assert moved[5]["value"].endswith(" (b), the same fragment as in Fig. 7.")
     plt.close(moved[0])
     with pytest.raises(fg.RunRefusal, match="the caption of the figure 'against the original' does not begin with "
                                             "'Fig. 7.' - its place in FIGURES"):
-        fg.build(built["cache"], built["papers"], paths={"cache_root": built["cache"]}, e4_pin=built["pin"], force=True,
+        fg.build(built["cache"], built["papers"], paths={"cache_root": built["cache"]}, **built["pins"], force=True,
                  log=lambda *a: None)
 
 
@@ -977,11 +1027,10 @@ def test_every_index_value_equals_its_key(built):
         if item["key"] == "constant":
             assert item["file"] == built["fg"].SCRIPT and item["op"] == "text"
             continue
-        if item["op"] == "figure number":  # the number of a figure named in a caption (cycle 26): the caption under that
-            # number is that figure - the one against the original shows the fragment of the largest MGM
-            assert (item["file"], item["sha256"], item["key"]) == (built["fg"].SCRIPT, "", "FIGURES[7]"), item["id"]
-            assert captions[int(item["value"]) - 1].startswith(f"Fig. {item['value']}. The fragment {CHOSEN} with the "
-                                                               "largest MGM"), item["id"]
+        if item["op"] == "figure number":  # the number of a figure named in a caption (cycles 26, 27): the caption under
+            # that number is that figure, known by its own words
+            assert (item["file"], item["sha256"]) == (built["fg"].SCRIPT, ""), item["id"]
+            assert captions[int(item["value"]) - 1].startswith(f"Fig. {item['value']}. {NAMED[item['key']]}"), item["id"]
             numbers.append(item["id"])
             continue
         style = item["file"] == "core/studies/P001_vvc-dental/figures_style.toml"  # a style key printed (cycle 23)
@@ -990,12 +1039,14 @@ def test_every_index_value_equals_its_key(built):
         data = (tomllib.loads if style else json.loads)(path.read_text(encoding="utf-8"))
         assert printed(apply(item["op"], resolve(data, item["key"])), item["format"]) == item["value"], item["id"]
         checked += 1
-    assert checked > 200 and numbers == ["Caption Fig. 2 / same fragment, figure"]
+    assert checked > 200 and numbers == ["Caption Fig. 2 / plots, first figure", "Caption Fig. 2 / plots, second figure",
+                                         "Caption Fig. 2 / same fragment, figure"]
     ids = [r[0] for r in index[1:]]
     assert len(ids) == len(set(ids))
     for prefix in ("Fig. 1 / ", "Fig. 2 / ", "Fig. 3 (a) / ", "Fig. 3 (e) / ", "Fig. 4 (b) / ", "Fig. 5 (d) / ",
                    "Fig. 6 (a) / ", "Fig. 7 (b) / ", "Fig. 8 / ", "Table 1 / ", "Table 2 / note / ", "Table 3 / ",
-                   "Caption Fig. 1 / ", "Caption Fig. 2 / ", "Caption Fig. 6 / ", "Caption Fig. 8 / ", "Caption Table 3 / "):
+                   "Table 4 / head / ", "Table 4 / row 2 / ", "Table 4 / note / ", "Caption Fig. 1 / ", "Caption Fig. 2 / ",
+                   "Caption Fig. 6 / ", "Caption Fig. 8 / ", "Caption Table 3 / ", "Caption Table 4 / "):
         assert any(i.startswith(prefix) for i in ids), prefix
     # the former Fig. 2 to Fig. 7 are Fig. 3 to Fig. 8 (cycle 25): their rows moved, none is left under the old number
     for moved, old in (("Fig. {} / threshold lines, dB", 2), ("Caption Fig. {} / axis top (a)", 3), ("Fig. {} / n of rho", 4),
@@ -1005,19 +1056,32 @@ def test_every_index_value_equals_its_key(built):
     assert "Fig. 4 (a) / PCC range of the plan" in ids and not [i for i in ids if "x: PCC range" in i]  # owner, cycle 24
 
 
+def table_place(name, table):
+    """(row, column, a part or not) of the cell an index id names after "Table n / ": "row r / <head>[ / part]",
+    "head / k[ / part]" or "note[ / part]"; a head may hold " / " (Table 4), so it is matched against the head row."""
+    kind, _, rest = name.partition(" / ")
+    if kind == "note":
+        return len(table) - 1, 0, rest != ""
+    if kind == "head":
+        k, _, part = rest.partition(" / ")
+        return 0, int(k) - 1, part != ""
+    head = max((h for h in table[0] if rest == h or rest.startswith(h + " / ")), key=len)
+    return int(kind.removeprefix("row ")), table[0].index(head), rest != head
+
+
 def test_every_table_row_of_the_index_is_its_cell(built):
-    tables = {n: read_csv(built["out"] / "tables" / f"table{n}.csv") for n in (1, 2, 3)}
+    tables = {n: read_csv(built["out"] / "tables" / f"table{n}.csv") for n in (1, 2, 3, 4)}
     rows = 0
     for row in read_csv(built["out"] / "tables" / "numbers_index.csv")[1:]:
-        parts = row[0].split(" / ")
-        if not parts[0].startswith("Table "):
+        label, _, name = row[0].partition(" / ")
+        if not label.startswith("Table "):
             continue
-        table = tables[int(parts[0].removeprefix("Table "))]
-        if parts[1] == "note":
-            assert row[1] in table[-1][0] and len(table[-1]) == 1, row[0]
-        else:
-            text = table[int(parts[1].removeprefix("row "))][table[0].index(parts[2])]
-            assert (text == row[1]) if len(parts) == 3 else (row[1] in text), (row[0], row[1], text)
+        table = tables[int(label.removeprefix("Table "))]
+        r, c, part = table_place(name, table)
+        if name.startswith("note"):
+            assert len(table[-1]) == 1, row[0]
+        text = table[r][c]
+        assert (row[1] in text) if part else (text == row[1]), (row[0], row[1], text)
         rows += 1
     assert rows > 100
 
@@ -1025,7 +1089,11 @@ def test_every_table_row_of_the_index_is_its_cell(built):
 def test_every_digit_of_the_captions_is_an_index_row(built):
     captions = (built["out"] / "figures" / "captions.txt").read_text(encoding="utf-8").strip().split("\n\n")
     labels = [re.match(r"(Fig\. \d|Table \d)\. ", c).group(1) for c in captions]
-    assert labels == [f"Fig. {n}" for n in range(1, 9)] + ["Table 1", "Table 2", "Table 3"]
+    assert labels == [f"Fig. {n}" for n in range(1, 9)] + ["Table 1", "Table 2", "Table 3", "Table 4"]
+    assert captions[-1] == (  # the task of cycle 27
+        "Table 4. At one fixed PCC per codec for all units: CR over n = 16 patients; the ratio of CR at the fixed PCC to "
+        "CR at the threshold PCC of the unit for T = 42 dB and r_fix = CR(VVC) / CR(codec) for the patients and the "
+        "whole images.")
     index = read_csv(built["out"] / "tables" / "numbers_index.csv")[1:]
     mgm = {f["unit"]: f["mgm"] for f in built["fragments"]}
     assert captions[1:3] == [  # the forms of the task of cycle 25 with the words of the task of cycle 26
@@ -1058,7 +1126,7 @@ def test_every_digit_of_the_captions_is_an_index_row(built):
 def test_tables_decimal_point_no_cyrillic_no_sha256(built):
     from openpyxl import load_workbook
 
-    for n in (1, 2, 3):
+    for n in (1, 2, 3, 4):
         for line in read_csv(built["out"] / "tables" / f"table{n}.csv"):
             for value in line:
                 assert not re.search(r"\d,\d", value) and not CYRILLIC.search(value), (n, value)
@@ -1085,3 +1153,49 @@ def test_tables_decimal_point_no_cyrillic_no_sha256(built):
     assert table3[1][0] == "VVC" and table3[1][4] == f"{statistics.median(pcc):g} ({pcc[0]}–{pcc[-1]})"
     assert table3[5][0] == "JPEG PCC 50 (level 50 by Fidler et al.)" and table3[5][4] == "50"
     assert table3[5][-1] == f"{n - 3} of {n}; 13 of 16"
+
+
+def test_table4_from_the_records_of_e5_fixed_by_another_path(built, tmp_path):
+    """Table 4 (task of cycle 27): every cell from the records of e5_fixed.json by the test's own median, quartiles and
+    count of r_fix > 1 (not the functions of the build); the VVC row has "-" for r_fix; every digit of the head, the
+    cells and the note belongs to an index row of its cell; a unit below T in the run file is refused."""
+    fg = built["fg"]
+    fx = json.loads((built["cache"] / "cycles/26/e5_fixed.json").read_text(encoding="utf-8"))["analysis"]
+    table = read_csv(built["out"] / "tables" / "table4.csv")
+    m3 = lambda v: f"{percentile(v, 50):.3f} ({min(v):.3f}–{max(v):.3f})"  # noqa: E731
+    of = lambda name, level, c, field: [x[field] for x in fx[name] if x["codec" if name != "ratios" else "pair"] == c
+                                        and (level is None or x["level"] == level)]  # noqa: E731
+    assert table[0] == ["Codec", "Fixed PCC", "CR at the fixed PCC, median (q25–q75), n = 16 patients",
+                        "CR fixed / CR own, median (min–max): patients; whole images",
+                        "r_fix = CR(VVC) / CR(codec), median (min–max): patients; whole images",
+                        "r_fix > 1, of 16: patients; whole images"]
+    for row, c in zip(table[1:5], CODECS):
+        crs = of("patients", None, c, "cr_fix")
+        assert len(crs) == 16
+        want = [LABELS[c], str(FIXED_PCC[c]),
+                f"{percentile(crs, 50):.2f} ({percentile(crs, 25):.2f}–{percentile(crs, 75):.2f})",
+                f"{m3(of('patients', None, c, 'loss'))}; {m3(of('whole', None, c, 'loss'))}"]
+        if c == "vtm":
+            want += ["-", "-"]
+        else:
+            rp, rw = (of("ratios", level, f"vtm/{c}", "r_fix") for level in ("пациенты", "снимки"))
+            want += [f"{m3(rp)}; {m3(rw)}", f"{sum(r > 1 for r in rp)}; {sum(r > 1 for r in rw)}"]
+        assert row == want, c
+    assert table[5:] == [[f"Note. PSNR-HVS-M ≥ 42 dB for all {len(built['fragments'])} fragments and 16 whole images at "
+                          "the fixed PCC of every codec; descriptive analysis, declared after the main results."]]
+    found = {}
+    for row in read_csv(built["out"] / "tables" / "numbers_index.csv")[1:]:
+        if row[0].startswith("Table 4 / "):
+            found.setdefault(table_place(row[0].removeprefix("Table 4 / "), table)[:2], []).append(row[1])
+    for r, line_ in enumerate(table):
+        for c, text in enumerate(line_):
+            rest = text
+            for value in sorted(found.get((r, c), []), key=len, reverse=True):
+                assert value in rest, (r, c, value)
+                rest = rest.replace(value, "", 1)
+            assert not re.search(r"\d", rest), (r, c, rest)
+    below = json.loads((built["cache"] / "cycles/26/e5_fixed.json").read_text(encoding="utf-8"))
+    below["analysis"]["below"][5]["below"] = 1
+    (tmp_path / "below.json").write_text(json.dumps(below, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(fg.RunRefusal, match="Table 4: a unit lies below T at the fixed PCC"):
+        fg.table4(fg.Source("cycles/26/e5_fixed.json", tmp_path / "below.json"), style_of(fg))
