@@ -9,7 +9,8 @@ the run file (relative to cache_root), its sha256, the key in the file, the oper
 NUMBERS.md). The composition is the one declared in the tasks of cycles 19, 22 and 25; the figures are numbered in the
 order of their mention (cycle 25): Fig. 1 - the initial data, Fig. 2 - the fragments of the plots, Fig. 3 - PSNR-HVS-M,
 PSNR and HaarPSI on CR, Fig. 4 - PSNR-HVS-M on PCC, Fig. 5 - the threshold PCC on MGM, Fig. 6 - the effect r with its
-CI, Fig. 7 - CR and r on the MGM of the patient, Fig. 8 - against the original. All text is English with a decimal
+CI, Fig. 7 - CR and r on the MGM of the patient, Fig. 8 - against the original (FIGURES; Fig. 8 named in the caption of
+Fig. 2 takes its number from there, cycle 26). All text is English with a decimal
 point; the codec is "VVC" (VTM only as the implementation in Table 1); lines of different colour and style carry small
 markers, Fig. 5 and Fig. 6 - small markers without lines (STUDY.md section 7, the owner's exception); an axis of PCC is
 labelled "PCC" without its meaning in brackets (that is in Table 1) and no x axis has a negative value (cycle 24).
@@ -71,6 +72,8 @@ VERSION_FIELDS = {  # Table 1: the version numbers taken from header.codec_versi
 }
 VERSION = re.compile(r"\d+(?:\.\d+)+(?:\+\d+)?")  # "1.23.6"; "4.3+1" of "x265 HEVC encoder (4.3+1-e9b8812)"
 CONTAINER = {"vtm": "HEIF (vvc1)", "jpeg": "JFIF", "heif": "HEIF (hvc1)", "avif": "AVIF"}
+FIGURES = ("initial data", "fragments of the plots", "metrics on CR", "PSNR-HVS-M on PCC", "threshold PCC on MGM",
+           "effect r", "CR and r on MGM", "against the original")  # the order of mention: Fig. n is FIGURES[n - 1]
 OUTPUTS = [f"figures/fig{k}.{ext}" for k in range(1, 9) for ext in ("pdf", "png", "csv")] + ["figures/captions.txt"] + \
           [f"tables/table{k}.{ext}" for k in (1, 2, 3) for ext in ("xlsx", "csv")] + ["tables/numbers_index.csv"]
 INDEX_COLUMNS = ("id", "value", "file", "sha256", "key", "op", "format")
@@ -188,6 +191,12 @@ def name_en(text):
 def threshold(e5, t):
     """The cell of the threshold t as printed, from thresholds_db of E5."""
     return cell(t, ".0f", e5, f"thresholds_db[{e5.data['thresholds_db'].index(t)}]")
+
+
+def figure_number(name):
+    """The number of a figure named in a caption - its place in FIGURES, the numbering of the build (cycle 26): a
+    renumbering moves the reference together with the files and the captions."""
+    return cell(FIGURES.index(name) + 1, "d", None, f"FIGURES[{FIGURES.index(name)}]", "figure number")
 
 
 # ---------------------------------------------------------------- the choice of fragments
@@ -578,13 +587,18 @@ def fig1(e5, tiles, arrays, style, plt, target):
 
 # ---------------------------------------------------------------- Fig. 2: the fragments of the plots
 
-def fig2(e5, tiles, arrays, style, plt):
+def fig2(e5, tiles, arrays, style, plt, compared):
     """The fragments of the plots of Fig. 3 and Fig. 4 (extreme_fragments; owner, cycle 25): (a) of simple structure,
     (b) of complex structure, one row over fig2_width, no mark on the images, the letters below the row. The pixels are
     those of the grid of cycle 9 (load_units, as Fig. 8); in the PNG every panel is repeated fig2_scale times on whole
-    pixels, the dpi is the smallest at which the row fits the width."""
+    pixels, the dpi is the smallest at which the row fits the width. The caption names (b) the same fragment as the
+    figure "against the original" by its number (cycle 26); `compared` - the fragment of that figure, another one is
+    refused."""
     p, f = style["page"], style["figures"]
     picks = extreme_fragments(e5.data["analysis"]["complexity"]["fragments"])
+    if picks[1]["unit"] != compared:
+        raise RunRefusal(f"Fig. 2 (b) is {picks[1]['unit']}, the figure against the original shows {compared}: the caption "
+                         "names them the same fragment")
     tile, k = tiles.data["parameters"]["tile"], f["fig2_scale"]
     side, n = int(tile * k), len(picks)
     width_in = width_cm(style, "fig2") / 2.54
@@ -612,7 +626,8 @@ def fig2(e5, tiles, arrays, style, plt):
     caption = joined("Fig. 2. The fragments of the plots of Figs. ", ("plots, first figure", constant("3")), " and ",
                      ("plots, second figure", constant("4")), ", ", ("fragment width", size_cell), " × ",
                      ("fragment height", size_cell), " pixels: of simple structure ", cells[0][0], ", MGM = ", cells[0][1],
-                     " (a) and of complex structure ", cells[1][0], ", MGM = ", cells[1][1], " (b).")
+                     " (a) and of complex structure ", cells[1][0], ", MGM = ", cells[1][1], " (b), the same fragment as "
+                     "in Fig. ", ("same fragment, figure", figure_number("against the original")), ".")
     return fig, data, series, dpi, panels, caption
 
 
@@ -658,7 +673,8 @@ def fig3(e4, e5, style, plt):
     th = [threshold(e5, x) for x in e5.data["thresholds_db"]]
     caption = joined("Fig. 3. Dependences of PSNR-HVS-M (a,b), PSNR (c,d) and HaarPSI (e,f) on compression ratio (CR) for "
                      "the fragments of simple structure ", cells[0][0], ", MGM = ", cells[0][1], " (a,c,e) and complex "
-                     "structure ", cells[1][0], ", MGM = ", cells[1][1], " (b,d,f); horizontal lines - the thresholds T = ",
+                     "structure ", cells[1][0], ", MGM = ", cells[1][1], " (b,d,f); horizontal lines in (a,b) - the "
+                     "thresholds T = ",
                      ("T 1", th[0]), ", ", ("T 2", th[1]), " and ", ("T 3", th[2]), " dB.")
     return fig, data, series, style["page"]["dpi"], [], caption
 
@@ -1052,11 +1068,16 @@ def build(cache_root, papers_root, paths=None, style_file=STYLE_FILE, force=Fals
     (out / "tables").mkdir(parents=True, exist_ok=True)
     plt, font = setup(style)
     index, captions = [], []
-    for n, (fig, data, series, dpi, panels, caption) in enumerate((
-            fig1(e5, tiles, arrays, style, plt, "png"), fig2(e5, tiles, arrays, style, plt), fig3(e4, e5, style, plt),
-            fig4(e4, e5, style, plt), fig5(e5, style, plt), fig6(e5, style, plt), fig7(e5, style, plt),
-            fig8(e5, e6, unit, original, recons, style, plt)), 1):
-        if n == 1:  # Fig. 1 has a layout of its own for the PDF: the three rasters of one height
+    drawn = {"initial data": fig1(e5, tiles, arrays, style, plt, "png"),
+             "fragments of the plots": fig2(e5, tiles, arrays, style, plt, unit), "metrics on CR": fig3(e4, e5, style, plt),
+             "PSNR-HVS-M on PCC": fig4(e4, e5, style, plt), "threshold PCC on MGM": fig5(e5, style, plt),
+             "effect r": fig6(e5, style, plt), "CR and r on MGM": fig7(e5, style, plt),
+             "against the original": fig8(e5, e6, unit, original, recons, style, plt)}
+    for n, name in enumerate(FIGURES, 1):
+        fig, data, series, dpi, panels, caption = drawn[name]
+        if not caption["value"].startswith(f"Fig. {n}. "):
+            raise RunRefusal(f"the caption of the figure '{name}' does not begin with 'Fig. {n}.' - its place in FIGURES")
+        if name == "initial data":  # Fig. 1 has a layout of its own for the PDF: the three rasters of one height
             pdf = fig1(e5, tiles, arrays, style, plt, "pdf")[0]
             pdf.savefig(out / "figures" / "fig1.pdf", metadata=PDF_METADATA)
             plt.close(pdf)

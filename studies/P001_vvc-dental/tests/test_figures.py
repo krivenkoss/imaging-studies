@@ -12,8 +12,12 @@ D10 and fragment, and a coder of the test's own - no pixel of the data, no real 
   of Fig. 1 - by the formula of B11;
 - Fig. 2 (cycle 25): (a), (b) - the codes of the simple and the complex fragment of the plots of Fig. 3 and Fig. 4, the
   pixels of the loader (the grid) without interpolation, one row, the letters below the row and not over the images;
+  its caption names (b) the same fragment as Fig. 8 by the number of the figure against the original in the numbering
+  of the build - a reordered numbering moves it, a build whose captions disagree with the numbering is refused, and a
+  figure against the original of another fragment is refused (cycle 26);
 - the CSV of every figure equals the data of the run files; the series of Fig. 3 carry the data of their own codec;
-  Fig. 3 has six panels, (e), (f) - HaarPSI of E4 on CR without threshold lines (cycle 25);
+  Fig. 3 has six panels, (e), (f) - HaarPSI of E4 on CR without threshold lines (cycle 25), its caption places the
+  threshold lines in (a,b) (cycle 26);
 - every series of the plots is a line with markers: the marker size equals the style, is 2.5 pt and at most 4 pt, at
   most markevery_max markers on a line; every series, threshold line and r = 1 has a legend entry; the labels of the
   logarithmic axes carry no "x 10^n"; an axis label with PCC has no brackets and no x axis of a plot has a negative
@@ -564,7 +568,7 @@ def test_fig2_the_fragments_of_the_plots_pixel_for_pixel_and_letters_below(drawn
     style = style_of(fg)
     e4, e5, _, tiles = sources(drawn)
     plt, _ = fg.setup(style)
-    fig, data, series, dpi, panels, caption = fg.fig2(e5, tiles, drawn["arrays"], style, plt)
+    fig, data, series, dpi, panels, caption = fg.fig2(e5, tiles, drawn["arrays"], style, plt, CHOSEN)
     f3, d3 = fg.fig3(e4, e5, style, plt)[:2]
     f4 = fg.fig4(e4, e5, style, plt)[0]
     units = [p["unit"] for p in panels]
@@ -597,9 +601,40 @@ def test_fig2_the_fragments_of_the_plots_pixel_for_pixel_and_letters_below(drawn
     mgm = {f["unit"]: f["mgm"] for f in drawn["fragments"]}
     assert caption["value"] == (
         f"Fig. 2. The fragments of the plots of Figs. 3 and 4, 512 × 512 pixels: of simple structure {SIMPLEST}, "
-        f"MGM = {mgm[SIMPLEST]:.4f} (a) and of complex structure {CHOSEN}, MGM = {mgm[CHOSEN]:.4f} (b).")
+        f"MGM = {mgm[SIMPLEST]:.4f} (a) and of complex structure {CHOSEN}, MGM = {mgm[CHOSEN]:.4f} (b), the same "
+        "fragment as in Fig. 8.")
     for x in (fig, f3, f4):
         plt.close(x)
+
+
+def test_fig2_names_the_figure_against_the_original_by_the_numbering(built):
+    """Fig. 2 (task of cycle 26): the number of the figure against the original in the caption of Fig. 2 is the number
+    the build gives that figure - with the order of mention reversed for the last two figures, the caption names Fig. 7
+    and the build refuses captions that keep their old numbers; a figure against the original of another fragment than
+    Fig. 2 (b) is refused."""
+    fg, monkeypatch = built["fg"], built["monkeypatch"]
+    style = style_of(fg)
+    _, e5, _, tiles = sources(built)
+    plt, _ = fg.setup(style)
+    caption = lambda compared: fg.fig2(e5, tiles, built["arrays"], style, plt, compared)  # noqa: E731
+    first = caption(CHOSEN)
+    mgm = {f["unit"]: f["mgm"] for f in built["fragments"]}
+    assert first[5]["value"].endswith(f"{CHOSEN}, MGM = {mgm[CHOSEN]:.4f} (b), the same fragment as in Fig. 8.")
+    plt.close(first[0])
+    with pytest.raises(fg.RunRefusal, match=f"Fig. 2 \\(b\\) is {CHOSEN}, the figure against the original shows "
+                                            f"{SIMPLEST}: the caption names them the same fragment"):
+        caption(SIMPLEST)
+    order = list(fg.FIGURES)
+    assert order[7] == "against the original"
+    order[6], order[7] = order[7], order[6]
+    monkeypatch.setattr(fg, "FIGURES", tuple(order))
+    moved = caption(CHOSEN)
+    assert moved[5]["value"].endswith(" (b), the same fragment as in Fig. 7.")
+    plt.close(moved[0])
+    with pytest.raises(fg.RunRefusal, match="the caption of the figure 'against the original' does not begin with "
+                                            "'Fig. 7.' - its place in FIGURES"):
+        fg.build(built["cache"], built["papers"], paths={"cache_root": built["cache"]}, e4_pin=built["pin"], force=True,
+                 log=lambda *a: None)
 
 
 def test_fig3_haarpsi_panels_equal_e4_without_threshold_lines(drawn):
@@ -853,7 +888,7 @@ def test_no_vvc_vtm_in_any_output(built, tmp_path):
     e4, e5, e6, tiles = sources(built)
     plt, _ = fg.setup(style)
     figs = [fg.fig1(e5, tiles, built["arrays"], style, plt, "png")[0], fg.fig1(e5, tiles, built["arrays"], style, plt, "pdf")[0],
-            fg.fig2(e5, tiles, built["arrays"], style, plt)[0], fg.fig3(e4, e5, style, plt)[0],
+            fg.fig2(e5, tiles, built["arrays"], style, plt, CHOSEN)[0], fg.fig3(e4, e5, style, plt)[0],
             fg.fig4(e4, e5, style, plt)[0], fg.fig5(e5, style, plt)[0], fg.fig6(e5, style, plt)[0],
             fg.fig7(e5, style, plt)[0], drawn_fig8(built, tmp_path)[3][0]]
     texts = [t.get_text() for fig in figs for t in fig.findobj(match=lambda o: hasattr(o, "get_text"))]
@@ -935,11 +970,19 @@ def test_every_index_value_equals_its_key(built):
     index = read_csv(built["out"] / "tables" / "numbers_index.csv")
     head = index[0]
     assert head == ["id", "value", "file", "sha256", "key", "op", "format"]
-    checked = 0
+    checked, numbers = 0, []
+    captions = (built["out"] / "figures" / "captions.txt").read_text(encoding="utf-8").strip().split("\n\n")
     for row in index[1:]:
         item = dict(zip(head, row))
         if item["key"] == "constant":
             assert item["file"] == built["fg"].SCRIPT and item["op"] == "text"
+            continue
+        if item["op"] == "figure number":  # the number of a figure named in a caption (cycle 26): the caption under that
+            # number is that figure - the one against the original shows the fragment of the largest MGM
+            assert (item["file"], item["sha256"], item["key"]) == (built["fg"].SCRIPT, "", "FIGURES[7]"), item["id"]
+            assert captions[int(item["value"]) - 1].startswith(f"Fig. {item['value']}. The fragment {CHOSEN} with the "
+                                                               "largest MGM"), item["id"]
+            numbers.append(item["id"])
             continue
         style = item["file"] == "core/studies/P001_vvc-dental/figures_style.toml"  # a style key printed (cycle 23)
         path = STUDY / "figures_style.toml" if style else built["cache"] / item["file"]
@@ -947,7 +990,7 @@ def test_every_index_value_equals_its_key(built):
         data = (tomllib.loads if style else json.loads)(path.read_text(encoding="utf-8"))
         assert printed(apply(item["op"], resolve(data, item["key"])), item["format"]) == item["value"], item["id"]
         checked += 1
-    assert checked > 200
+    assert checked > 200 and numbers == ["Caption Fig. 2 / same fragment, figure"]
     ids = [r[0] for r in index[1:]]
     assert len(ids) == len(set(ids))
     for prefix in ("Fig. 1 / ", "Fig. 2 / ", "Fig. 3 (a) / ", "Fig. 3 (e) / ", "Fig. 4 (b) / ", "Fig. 5 (d) / ",
@@ -985,12 +1028,13 @@ def test_every_digit_of_the_captions_is_an_index_row(built):
     assert labels == [f"Fig. {n}" for n in range(1, 9)] + ["Table 1", "Table 2", "Table 3"]
     index = read_csv(built["out"] / "tables" / "numbers_index.csv")[1:]
     mgm = {f["unit"]: f["mgm"] for f in built["fragments"]}
-    assert captions[1:3] == [  # the forms of the task of cycle 25
+    assert captions[1:3] == [  # the forms of the task of cycle 25 with the words of the task of cycle 26
         f"Fig. 2. The fragments of the plots of Figs. 3 and 4, 512 × 512 pixels: of simple structure {SIMPLEST}, "
-        f"MGM = {mgm[SIMPLEST]:.4f} (a) and of complex structure {CHOSEN}, MGM = {mgm[CHOSEN]:.4f} (b).",
+        f"MGM = {mgm[SIMPLEST]:.4f} (a) and of complex structure {CHOSEN}, MGM = {mgm[CHOSEN]:.4f} (b), the same "
+        "fragment as in Fig. 8.",
         "Fig. 3. Dependences of PSNR-HVS-M (a,b), PSNR (c,d) and HaarPSI (e,f) on compression ratio (CR) for the "
         f"fragments of simple structure {SIMPLEST}, MGM = {mgm[SIMPLEST]:.4f} (a,c,e) and complex structure {CHOSEN}, "
-        f"MGM = {mgm[CHOSEN]:.4f} (b,d,f); horizontal lines - the thresholds T = 40, 41 and 42 dB."]
+        f"MGM = {mgm[CHOSEN]:.4f} (b,d,f); horizontal lines in (a,b) - the thresholds T = 40, 41 and 42 dB."]
     assert captions[3:6] == [  # the forms of the task of cycle 22, renumbered in cycle 25
         "Fig. 4. Dependences of PSNR-HVS-M on PCC for VVC (a), JPEG (b), HEIF (c) and AVIF (d) for the fragments of "
         f"simple structure {SIMPLEST} (solid lines) and complex structure {CHOSEN} (dashed lines); horizontal lines - "
