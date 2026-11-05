@@ -11,9 +11,9 @@ is the one declared in the tasks of cycles 19, 22, 25 and 27; the figures are nu
 (cycle 25): Fig. 1 - the initial data, Fig. 2 - the fragments of the plots, Fig. 3 - PSNR-HVS-M, PSNR and HaarPSI on
 CR, Fig. 4 - PSNR-HVS-M on PCC, Fig. 5 - the threshold PCC on MGM, Fig. 6 - the effect r with its CI, Fig. 7 - CR and r
 on the MGM of the patient, Fig. 8 - against the original (FIGURES; the figures named in the caption of Fig. 2 take
-their numbers from there, cycles 26 and 27). All text is English with a decimal
-point; the codec is "VVC" (VTM only as the implementation in Table 1); lines of different colour and style carry small
-markers, Fig. 5 and Fig. 6 - small markers without lines (STUDY.md section 7, the owner's exception); an axis of PCC is
+their numbers from there, cycles 26 and 27). All text is English with a decimal point; a count in a caption, a
+head or a note is the number with its noun, without "n =" (cycle 28); the codec is "VVC" (VTM only as the
+implementation in Table 1); lines of different colour and style carry small markers, Fig. 5 and Fig. 6 - small markers without lines (STUDY.md section 7, the owner's exception); an axis of PCC is
 labelled "PCC" without its meaning in brackets (that is in Table 1) and no x axis has a negative value (cycle 24).
 Images: Fig. 1 - the image D10 of the copy data/P001 with its grid (B11), a typical fragment and a fragment of the
 owner's choice; Fig. 2 - the fragments of simple and complex structure of Fig. 3 and Fig. 4; Fig. 8 - the original
@@ -184,7 +184,7 @@ def number(x):
 def verdict_en(text):
     if text is None:
         return "descriptive"
-    return f"VVC better than {text.removeprefix('VVC выгоднее ')}" if text.startswith("VVC выгоднее ") else "not established"
+    return f"VVC is better than {text.removeprefix('VVC выгоднее ')}" if text.startswith("VVC выгоднее ") else "not established"
 
 
 def name_en(text):
@@ -302,10 +302,10 @@ def table2(e5, style):
         rows.append(line_)
     whole, main = a["whole_comparisons"], pick(a["comparisons"], role="основное")
     note = joined(
-        f"Note. Effect - the Hodges-Lehmann estimate of r = CR({vvc}) / CR(codec) with its 95% CI; n = ",
+        f"Note. Effect - the Hodges-Lehmann estimate of r = CR({vvc}) / CR(codec) with its 95% CI; ",
         ("n patients", cell(same([c["n"] for c in a["comparisons"]], "n of patients"), "d", e5, "analysis.comparisons.n",
                             "same")),
-        " patients and n = ",
+        " patients and ",
         ("n whole images", cell(same([c["n"] for c in whole], "n of whole images"), "d", e5,
                                 "analysis.whole_comparisons.n", "same")),
         " whole images in every comparison; exact two-sided Wilcoxon signed-rank test, p = ",
@@ -356,7 +356,7 @@ def table3(e5, style):
                      spread(e5, f"{uk}.psnr_db", [number(u["psnr_db"]) for u in units], "median", "min", "max", ".2f"),
                      spread(e5, f"{uk}.haarpsi", [u["haarpsi"] for u in units], "median", "min", "max", ".4f"),
                      constant("-")])
-    head = ("Codec or point", "n patients", "CR, median (q25–q75)", "n fragments",
+    head = ("Codec or point", "Number of patients", "CR, median (q25–q75)", "Number of fragments",
             f"Threshold PCC for T = {T_MAIN:.0f} dB, median (min–max), {same(counts, 'n fragments')} fragments",
             "PSNR, dB, median (min–max)", "HaarPSI, median (min–max)",
             f"PSNR-HVS-M ≥ {T_MAIN:.0f} dB: fragments; whole images")
@@ -384,10 +384,10 @@ def table3(e5, style):
                  joined(*reached)])
     pw, uw = dict(codec="vtm", t_db=T_MAIN), dict(level="f", codec="vtm", t_db=T_MAIN, judged=True)
     title = joined("Table 3. At the threshold T = ", ("T", threshold(e5, T_MAIN)), " dB by codec and at the point JPEG PCC ",
-                   ("JPEG point", constant(JPEG50_PCC)), ": CR over n = ",
+                   ("JPEG point", constant(JPEG50_PCC)), ": CR over ",
                    ("n patients", cell(len(pick(a["patients"], **pw)), "d", e5, f"analysis.patients[{where_text(**pw)}]",
                                        "count")),
-                   " patients; the threshold PCC, PSNR and HaarPSI over n = ",
+                   " patients; the threshold PCC, PSNR and HaarPSI over ",
                    ("n fragments", cell(len(pick(a["units"], **uw)), "d", e5, f"analysis.units[{where_text(**uw)}]",
                                         "count")),
                    " fragments; at JPEG PCC ", ("JPEG point again", constant(JPEG50_PCC)),
@@ -439,7 +439,7 @@ def table4(fx, style):
                     "analysis.summary[what=r_fix].n", "same")
     head = ("Codec", "Fixed PCC",
             joined("CR at the fixed PCC, median (q", ("lower quartile", constant("25")), "–q", ("upper quartile",
-                   constant("75")), "), n = ", ("n patients", n_patients), " patients"),
+                   constant("75")), "), ", ("n patients", n_patients), " patients"),
             "CR fixed / CR own, median (min–max): patients; whole images",
             f"r_fix = CR({vvc}) / CR(codec), median (min–max): patients; whole images",
             joined("r_fix > ", ("reference r", constant("1")), ", of ", ("n", n_ratios), ": patients; whole images"))
@@ -450,7 +450,7 @@ def table4(fx, style):
                   ("n whole images", cell(same([x["n"] for x in pick(a["below"], level="снимки")], "n of whole images"),
                                           "d", fx, "analysis.below[level=снимки].n", "same")),
                   " whole images at the fixed PCC of every codec; descriptive analysis, declared after the main results.")
-    title = joined("Table 4. At one fixed PCC per codec for all units: CR over n = ", ("n patients", n_patients),
+    title = joined("Table 4. At one fixed PCC per codec for all units: CR over ", ("n patients", n_patients),
                    " patients; the ratio of CR at the fixed PCC to CR at the threshold PCC of the unit for T = ", ("T", t),
                    f" dB and r_fix = CR({vvc}) / CR(codec) for the patients and the whole images.")
     return head, rows, [note], title
@@ -886,8 +886,8 @@ def fig6(e5, style, plt):
     th = [threshold(e5, x) for x in thresholds]
     caption = joined(f"Fig. 6. The effect r = CR({vvc}) / CR(codec) (Hodges-Lehmann estimate) with its ",
                      ("CI level", constant("95")), "% CI for the patients (a) and the whole images (b) at T = ",
-                     ("T 1", th[0]), ", ", ("T 2", th[1]), " and ", ("T 3", th[2]), " dB; n = ", ("n", n),
-                     "; dashed line - r = ", ("reference", one), ".")
+                     ("T 1", th[0]), ", ", ("T 2", th[1]), " and ", ("T 3", th[2]), " dB; ", ("n", n), " patients and ",
+                     ("n whole images", n_whole), " whole images; dashed line - r = ", ("reference", one), ".")
     return fig, data, series, p["dpi"], [], caption
 
 
@@ -935,7 +935,7 @@ def fig7(e5, style, plt):
         ax.legend(loc=f["fig7_legend"], ncols=f["fig7_legend_columns"])
     caption = joined("Fig. 7. Dependences of the median CR at T = ", ("T", threshold(e5, T_MAIN)), " dB (a) and of r = "
                      f"CR({vvc}) / CR(codec) (b) on the MGM of the patient (the median over the fragments of the image) "
-                     "for n = ", ("n patients", patients), " patients; dashed line - r = ", ("reference", one), ".")
+                     "for ", ("n patients", patients), " patients; dashed line - r = ", ("reference", one), ".")
     return fig, data, series, style["page"]["dpi"], [], caption
 
 

@@ -41,6 +41,10 @@ D10 and fragment, and a coder of the test's own - no pixel of the data, no real 
   evaluator of keys; every table row of the index is the cell or a part of it; every digit of the captions belongs to
   an index row of its caption; Table 1 has no sha256;
 - a decimal point only and no Cyrillic in the tables and in the texts of the figures;
+- the words of the tables and captions of cycle 28: no "n = " before a number and no head "n <noun>" in any caption,
+  head or note - "Number of patients", "Number of fragments", "VVC is better than ...", "16 patients and 16 whole
+  images"; the index rows of those numbers keep their ids, keys and operations, Table 3 rows take the new head into
+  their ids, and the caption of Fig. 6 has one row more - the whole images (owner, 2026-11-05);
 - colour and line style differ for every pair of series; the style table has four colours, lines and markers.
 """
 
@@ -999,7 +1003,7 @@ def apply(op, node):
             "min": lambda: min(numbers(node)), "max": lambda: max(numbers(node)),
             "range": lambda: f"{min(node)} to {max(node)}",
             "list": lambda: "; ".join(f"{x:.0f}" for x in node),
-            "verdict": lambda: ("descriptive" if node is None else "VVC better than " + node[len("VVC выгоднее "):]
+            "verdict": lambda: ("descriptive" if node is None else "VVC is better than " + node[len("VVC выгоднее "):]
                                 if node.startswith("VVC выгоднее ") else "not established"),
             "name": lambda: "level 50 by Fidler et al." if node.startswith("уровень 50 по Fidler") else "JPEG PCC 50",
             "version": lambda: version_number(node), "same": lambda: only(node),
@@ -1090,8 +1094,8 @@ def test_every_digit_of_the_captions_is_an_index_row(built):
     captions = (built["out"] / "figures" / "captions.txt").read_text(encoding="utf-8").strip().split("\n\n")
     labels = [re.match(r"(Fig\. \d|Table \d)\. ", c).group(1) for c in captions]
     assert labels == [f"Fig. {n}" for n in range(1, 9)] + ["Table 1", "Table 2", "Table 3", "Table 4"]
-    assert captions[-1] == (  # the task of cycle 27
-        "Table 4. At one fixed PCC per codec for all units: CR over n = 16 patients; the ratio of CR at the fixed PCC to "
+    assert captions[-1] == (  # the task of cycle 27 with the words of cycle 28
+        "Table 4. At one fixed PCC per codec for all units: CR over 16 patients; the ratio of CR at the fixed PCC to "
         "CR at the threshold PCC of the unit for T = 42 dB and r_fix = CR(VVC) / CR(codec) for the patients and the "
         "whole images.")
     index = read_csv(built["out"] / "tables" / "numbers_index.csv")[1:]
@@ -1110,8 +1114,14 @@ def test_every_digit_of_the_captions_is_an_index_row(built):
         f"Fig. 5. Threshold PCC at T = 42 dB versus MGM for the {len(built['fragments'])} fragments: VVC (a), JPEG (b), "
         "HEIF (c) and AVIF (d); ρ - Spearman rank correlation.",
         "Fig. 6. The effect r = CR(VVC) / CR(codec) (Hodges-Lehmann estimate) with its 95% CI for the patients (a) and "
-        "the whole images (b) at T = 40, 41 and 42 dB; n = 16; dashed line - r = 1."]
-    assert captions[6].startswith("Fig. 7. Dependences of the median CR at T = 42 dB (a) and of r = CR(VVC) / CR(codec)")
+        "the whole images (b) at T = 40, 41 and 42 dB; 16 patients and 16 whole images; dashed line - r = 1."]  # cycle 28
+    assert captions[6] == (  # cycle 28
+        "Fig. 7. Dependences of the median CR at T = 42 dB (a) and of r = CR(VVC) / CR(codec) (b) on the MGM of the "
+        "patient (the median over the fragments of the image) for 16 patients; dashed line - r = 1.")
+    assert captions[10] == (  # cycle 28
+        "Table 3. At the threshold T = 42 dB by codec and at the point JPEG PCC 50: CR over 16 patients; the threshold "
+        f"PCC, PSNR and HaarPSI over {len(built['fragments'])} fragments; at JPEG PCC 50 - the share of the units with "
+        "PSNR-HVS-M ≥ 42 dB.")
     assert captions[7].startswith("Fig. 8. The fragment D08_r00_c04 with the largest MGM")
     for label, text in zip(labels, captions):
         rest = text.removeprefix(f"{label}. ")
@@ -1143,9 +1153,13 @@ def test_tables_decimal_point_no_cyrillic_no_sha256(built):
     assert table2[0][3] == "Patients, 42 dB" and table2[0][4] == "Whole images, 40 dB"
     assert table2[1] == ["VVC / JPEG", "1.240 (1.100–1.300)", "1.241 (1.100–1.300)", "1.242 (1.100–1.300)",
                          "1.240 (1.050–1.350)", "1.241 (1.050–1.350)", "1.242 (1.050–1.350)", "9.16e-05",
-                         "VVC better than JPEG"]
-    assert table2[3][-1] == "not established" and table2[4][-2:] == ["-", "-"]
-    assert "n = 16 patients" in table2[5][0] and "p = 3.05e-05" in table2[5][0] and "p (Holm) = 9.16e-05" in table2[5][0]
+                         "VVC is better than JPEG"]  # cycle 28
+    assert table2[2][-1] == "VVC is better than HEIF" and table2[3][-1] == "not established"
+    assert table2[4][-2:] == ["-", "-"]
+    assert table2[5] == [  # cycle 28
+        "Note. Effect - the Hodges-Lehmann estimate of r = CR(VVC) / CR(codec) with its 95% CI; 16 patients and 16 whole "
+        "images in every comparison; exact two-sided Wilcoxon signed-rank test, p = 3.05e-05 in every comparison; "
+        "p (Holm) = 9.16e-05 for the three main comparisons (42 dB, patients)."]
     table3 = read_csv(built["out"] / "tables" / "table3.csv")
     n = len(built["fragments"])
     assert table3[0][4] == f"Threshold PCC for T = 42 dB, median (min–max), {n} fragments"
@@ -1165,7 +1179,7 @@ def test_table4_from_the_records_of_e5_fixed_by_another_path(built, tmp_path):
     m3 = lambda v: f"{percentile(v, 50):.3f} ({min(v):.3f}–{max(v):.3f})"  # noqa: E731
     of = lambda name, level, c, field: [x[field] for x in fx[name] if x["codec" if name != "ratios" else "pair"] == c
                                         and (level is None or x["level"] == level)]  # noqa: E731
-    assert table[0] == ["Codec", "Fixed PCC", "CR at the fixed PCC, median (q25–q75), n = 16 patients",
+    assert table[0] == ["Codec", "Fixed PCC", "CR at the fixed PCC, median (q25–q75), 16 patients",  # cycle 28
                         "CR fixed / CR own, median (min–max): patients; whole images",
                         "r_fix = CR(VVC) / CR(codec), median (min–max): patients; whole images",
                         "r_fix > 1, of 16: patients; whole images"]
@@ -1199,3 +1213,40 @@ def test_table4_from_the_records_of_e5_fixed_by_another_path(built, tmp_path):
     (tmp_path / "below.json").write_text(json.dumps(below, ensure_ascii=False), encoding="utf-8")
     with pytest.raises(fg.RunRefusal, match="Table 4: a unit lies below T at the fixed PCC"):
         fg.table4(fg.Source("cycles/26/e5_fixed.json", tmp_path / "below.json"), style_of(fg))
+
+
+def test_no_n_before_a_number_in_captions_heads_and_notes(built):
+    """Cycle 28 (owner, 2026-11-05): a count is the number with its noun - no "n = " before a number and no head
+    "n <noun>" in any caption, head or note; the numbers keep their index rows (value, key, operation), the rows of
+    Table 3 carry the new head in their ids, the caption of Fig. 6 has one row more - its whole images."""
+    captions = (built["out"] / "figures" / "captions.txt").read_text(encoding="utf-8").strip().split("\n\n")
+    tables = [read_csv(built["out"] / "tables" / f"table{n}.csv") for n in (1, 2, 3, 4)]
+    notes = [t[-1][0] for t in tables if len(t[-1]) == 1]
+    assert len(captions) == 12 and len(notes) == 2  # the notes of Table 2 and Table 4
+    for text in captions + [h for t in tables for h in t[0]] + notes:
+        assert not re.search(r"\bn = \d", text) and not re.match(r"n [a-z]", text), text
+    assert (tables[2][0][1], tables[2][0][3]) == ("Number of patients", "Number of fragments")
+    n = str(len(built["fragments"]))
+    index = {r[0]: (r[1], r[4], r[5]) for r in read_csv(built["out"] / "tables" / "numbers_index.csv")[1:]}
+    want = {"Caption Fig. 6 / n": ("16", "analysis.comparisons.n", "same"),
+            "Caption Fig. 6 / n whole images": ("16", "analysis.whole_comparisons.n", "same"),
+            "Caption Fig. 7 / n patients": ("16", "analysis.complexity.patients", "count"),
+            "Caption Table 3 / n patients": ("16", "analysis.patients[codec=vtm,t_db=42.0]", "count"),
+            "Caption Table 3 / n fragments": (n, "analysis.units[level=f,codec=vtm,t_db=42.0,judged=True]", "count"),
+            "Caption Table 4 / n patients": ("16", "analysis.summary[level=пациенты].n", "same"),
+            "Table 4 / head / 3 / n patients": ("16", "analysis.summary[level=пациенты].n", "same"),
+            "Table 2 / note / n patients": ("16", "analysis.comparisons.n", "same"),
+            "Table 2 / note / n whole images": ("16", "analysis.whole_comparisons.n", "same"),
+            "Table 2 / row 1 / Conclusion": ("VVC is better than JPEG", "analysis.comparisons[8].verdict", "verdict"),
+            "Table 2 / row 2 / Conclusion": ("VVC is better than HEIF", "analysis.comparisons[9].verdict", "verdict"),
+            "Table 2 / row 3 / Conclusion": ("not established", "analysis.comparisons[10].verdict", "verdict"),
+            "Table 3 / row 5 / Number of patients": ("16", "analysis.jpeg50.patients", "count"),
+            "Table 3 / row 5 / Number of fragments": (n, "analysis.jpeg50.units[level=f]", "count")}
+    for k, c in enumerate(CODECS, 1):
+        want[f"Table 3 / row {k} / Number of patients"] = ("16", f"analysis.patients[codec={c},t_db=42.0]", "count")
+        want[f"Table 3 / row {k} / Number of fragments"] = (
+            n, f"analysis.units[level=f,codec={c},t_db=42.0,judged=True]", "count")
+    assert {i: index.get(i) for i in want} == want
+    assert not [i for i in index if i.startswith("Table 3 / row ") and i.endswith((" / n patients", " / n fragments"))]
+    assert sorted(i.removeprefix("Caption Fig. 6 / ") for i in index if i.startswith("Caption Fig. 6 / ")) == \
+        sorted(("CI level", "T 1", "T 2", "T 3", "n", "n whole images", "reference"))
